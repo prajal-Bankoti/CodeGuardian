@@ -533,9 +533,9 @@ Please analyze the provided code diff and return a comprehensive review in the s
 **Language:** ${language}
 
 **Complete PR Diff:**
-${'```'}
+\`\`\`
 ${diff}
-${'```'}
+\`\`\`
 
 **Instructions:**
 Analyze the ACTUAL diff content above and provide a comprehensive review based on the REAL changes in this specific pull request. Do NOT use generic or template responses. Focus on:
