@@ -1,25 +1,32 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import BitbucketConnection from '../components/bitbucket/BitbucketConnection';
+import Header from '../components/layout/Header';
 
 const BitbucketLogin: React.FC = () => {
     return (
         <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+            {/* Global Header */}
+            <Header />
+
             <div className="container-custom py-8">
-                {/* Header */}
+                {/* Page Header */}
                 <div className="mb-8">
                     <div className="flex items-center justify-between">
-                        <Link to="/" className="flex items-center space-x-3">
-                            <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-                                <span className="text-white font-bold text-sm">CG</span>
-                            </div>
-                            <span className="text-xl font-bold text-gray-900">CodeGuardian</span>
-                        </Link>
+                        <div>
+                            <h1 className="text-3xl font-bold text-gray-900 mb-2">Connect to Bitbucket</h1>
+                            <p className="text-gray-600">
+                                Link your Bitbucket account to start reviewing pull requests with AI
+                            </p>
+                        </div>
                         <Link
                             to="/app/dashboard"
-                            className="text-gray-600 hover:text-blue-600 transition-colors"
+                            className="text-gray-600 hover:text-blue-600 transition-colors flex items-center space-x-2"
                         >
-                            ← Back to Dashboard
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                            </svg>
+                            <span>Back to Dashboard</span>
                         </Link>
                     </div>
                 </div>
@@ -27,12 +34,6 @@ const BitbucketLogin: React.FC = () => {
                 {/* Main Content */}
                 <div className="max-w-2xl mx-auto">
                     <div className="text-center mb-8">
-                        <h1 className="text-4xl font-bold text-gray-900 mb-4">
-                            Connect to Bitbucket
-                        </h1>
-                        <p className="text-xl text-gray-600 mb-2">
-                            Link your Bitbucket account to start reviewing pull requests with AI
-                        </p>
                         <p className="text-gray-500">
                             We'll help you analyze your code, suggest improvements, and catch potential issues
                         </p>
