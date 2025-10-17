@@ -71,3 +71,4 @@ Once connected, CodeGuardian will:
 - Verify your OAuth app has repository read permissions
 - Check your internet connection
 - Ensure your Bitbucket account is active
+

@@ -17,3 +17,4 @@ router.route('/:id')
   .delete(authorize('admin'), deleteUser);
 
 export default router;
+

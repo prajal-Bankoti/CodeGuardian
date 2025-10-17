@@ -13,3 +13,4 @@ export const API_ENDPOINTS = {
     PROFILE: '/users/profile',
   },
 } as const;
+

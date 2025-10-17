@@ -5,3 +5,4 @@ export const notFound = (req: Request, res: Response, next: NextFunction): void 
   res.status(404);
   next(error);
 };
+

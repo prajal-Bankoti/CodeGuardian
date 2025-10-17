@@ -90,3 +90,4 @@ export const deleteUser = async (req: AuthRequest, res: Response, next: NextFunc
     next(error);
   }
 };
+
