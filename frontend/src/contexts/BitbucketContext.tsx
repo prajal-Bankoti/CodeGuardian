@@ -3,6 +3,76 @@ import { useNavigate } from 'react-router-dom';
 import { bitbucketService, BitbucketUser, BitbucketRepository, BitbucketPullRequest } from '../services/bitbucketService';
 import { apiService } from '../services/apiService';
 
+// Cache keys for localStorage
+const CACHE_KEYS = {
+    USER_DATA: 'bitbucket_user_data',
+    USER_DATA_TIMESTAMP: 'bitbucket_user_data_timestamp',
+    REPOSITORIES: 'bitbucket_repositories',
+    REPOSITORIES_TIMESTAMP: 'bitbucket_repositories_timestamp',
+    TOKEN_EXPIRY: 'bitbucket_token_expiry'
+};
+
+// Cache duration in milliseconds (24 hours)
+const CACHE_DURATION = 24 * 60 * 60 * 1000;
+
+// Cache utility functions
+const cacheUtils = {
+    // Check if cached data is still valid
+    isCacheValid: (timestampKey: string): boolean => {
+        const timestamp = localStorage.getItem(timestampKey);
+        if (!timestamp) return false;
+
+        const cacheTime = parseInt(timestamp, 10);
+        const now = Date.now();
+        return (now - cacheTime) < CACHE_DURATION;
+    },
+
+    // Get cached data
+    getCachedData: (dataKey: string): any => {
+        try {
+            const data = localStorage.getItem(dataKey);
+            return data ? JSON.parse(data) : null;
+        } catch (error) {
+            console.error('Error parsing cached data:', error);
+            return null;
+        }
+    },
+
+    // Set cached data with timestamp
+    setCachedData: (dataKey: string, timestampKey: string, data: any): void => {
+        try {
+            localStorage.setItem(dataKey, JSON.stringify(data));
+            localStorage.setItem(timestampKey, Date.now().toString());
+        } catch (error) {
+            console.error('Error caching data:', error);
+        }
+    },
+
+    // Clear all cached data
+    clearCache: (): void => {
+        Object.values(CACHE_KEYS).forEach(key => {
+            localStorage.removeItem(key);
+        });
+        // Also clear existing token storage
+        localStorage.removeItem('bitbucket_token_expires');
+    },
+
+    // Check if token is expired
+    isTokenExpired: (): boolean => {
+        const tokenExpiry = localStorage.getItem('bitbucket_token_expires');
+        if (!tokenExpiry) return true;
+
+        const expiryTime = parseInt(tokenExpiry, 10);
+        return Date.now() >= expiryTime;
+    },
+
+    // Set token expiry time (this is handled by bitbucketService.storeTokens)
+    setTokenExpiry: (expiresIn: number): void => {
+        // This is handled by bitbucketService.storeTokens, so we don't need to do anything here
+        console.log('Token expiry will be set by bitbucketService.storeTokens');
+    }
+};
+
 interface BitbucketContextType {
     isAuthenticated: boolean;
     user: BitbucketUser | null;
@@ -15,7 +85,7 @@ interface BitbucketContextType {
     login: () => void;
     logout: () => void;
     fetchRepositories: (page?: number, pagelen?: number) => Promise<void>;
-    fetchPullRequests: (page?: number, pagelen?: number) => Promise<void>;
+    fetchPullRequests: (repository: string, page?: number, pagelen?: number) => Promise<void>;
     refreshData: () => Promise<void>;
 }
 
@@ -41,7 +111,18 @@ export const BitbucketProvider: React.FC<BitbucketProviderProps> = ({ children }
         const checkAuth = async () => {
             if (bitbucketService.isAuthenticated()) {
                 setIsAuthenticated(true);
-                await loadUserData();
+
+                // Check if token is expired
+                if (cacheUtils.isTokenExpired()) {
+                    console.log('🔄 Token expired, clearing cache and requiring re-authentication');
+                    cacheUtils.clearCache();
+                    bitbucketService.clearTokens();
+                    setIsAuthenticated(false);
+                    return;
+                }
+
+                // Try to load cached data first
+                await loadCachedUserData();
             }
         };
 
@@ -66,7 +147,7 @@ export const BitbucketProvider: React.FC<BitbucketProviderProps> = ({ children }
                     setError(null);
 
                     const authResponse = await bitbucketService.exchangeCodeForToken(code);
-                    bitbucketService.storeTokens(authResponse);
+                    bitbucketService.storeTokens(authResponse); // This already stores token expiry
 
                     setIsAuthenticated(true);
                     await loadUserData();
@@ -88,6 +169,39 @@ export const BitbucketProvider: React.FC<BitbucketProviderProps> = ({ children }
         handleOAuthCallback();
     }, [navigate]);
 
+    const loadCachedUserData = async () => {
+        try {
+            // Try to load user data from cache first
+            if (cacheUtils.isCacheValid(CACHE_KEYS.USER_DATA_TIMESTAMP)) {
+                const cachedUser = cacheUtils.getCachedData(CACHE_KEYS.USER_DATA) as BitbucketUser;
+                if (cachedUser) {
+                    console.log('💾 Loading user data from cache');
+                    setUser(cachedUser);
+                }
+            }
+
+            // Try to load repositories from cache first
+            if (cacheUtils.isCacheValid(CACHE_KEYS.REPOSITORIES_TIMESTAMP)) {
+                const cachedRepos = cacheUtils.getCachedData(CACHE_KEYS.REPOSITORIES) as BitbucketRepository[];
+                if (cachedRepos) {
+                    console.log('💾 Loading repositories from cache');
+                    setRepositories(cachedRepos);
+                }
+            }
+
+            // If no valid cache, load from API
+            if (!cacheUtils.isCacheValid(CACHE_KEYS.USER_DATA_TIMESTAMP) ||
+                !cacheUtils.isCacheValid(CACHE_KEYS.REPOSITORIES_TIMESTAMP)) {
+                console.log('🌐 Cache expired or missing, loading fresh data from API');
+                await loadUserData();
+            }
+        } catch (err) {
+            console.error('Error loading cached user data:', err);
+            // Fallback to API if cache fails
+            await loadUserData();
+        }
+    };
+
     const loadUserData = async () => {
         try {
             setLoading(true);
@@ -105,13 +219,21 @@ export const BitbucketProvider: React.FC<BitbucketProviderProps> = ({ children }
             ]);
 
             if (userResponse.success && userResponse.data) {
-                setUser(userResponse.data as BitbucketUser);
+                const userData = userResponse.data as BitbucketUser;
+                setUser(userData);
+                // Cache user data
+                cacheUtils.setCachedData(CACHE_KEYS.USER_DATA, CACHE_KEYS.USER_DATA_TIMESTAMP, userData);
+                console.log('💾 User data cached for 24 hours');
             } else {
                 throw new Error(userResponse.message || 'Failed to load user data');
             }
 
             if (reposResponse.success && reposResponse.data) {
-                setRepositories(reposResponse.data as BitbucketRepository[]);
+                const reposData = reposResponse.data as BitbucketRepository[];
+                setRepositories(reposData);
+                // Cache repositories data
+                cacheUtils.setCachedData(CACHE_KEYS.REPOSITORIES, CACHE_KEYS.REPOSITORIES_TIMESTAMP, reposData);
+                console.log('💾 Repositories data cached for 24 hours');
             } else {
                 console.warn('Failed to load repositories:', reposResponse.message);
                 setRepositories([]);
@@ -131,6 +253,7 @@ export const BitbucketProvider: React.FC<BitbucketProviderProps> = ({ children }
 
     const logout = () => {
         bitbucketService.clearTokens();
+        cacheUtils.clearCache(); // Clear all cached data
         setIsAuthenticated(false);
         setUser(null);
         setRepositories([]);
@@ -147,8 +270,14 @@ export const BitbucketProvider: React.FC<BitbucketProviderProps> = ({ children }
 
             const response = await apiService.getRepositories(page, pagelen);
             if (response.success && response.data) {
-                setRepositories(response.data as BitbucketRepository[]);
+                const reposData = response.data as BitbucketRepository[];
+                setRepositories(reposData);
                 setRepositoriesPagination((response as any).pagination || null);
+
+                // Cache repositories data (only for first page to avoid cache pollution)
+                if (page === 1) {
+                    cacheUtils.setCachedData(CACHE_KEYS.REPOSITORIES, CACHE_KEYS.REPOSITORIES_TIMESTAMP, reposData);
+                }
             } else {
                 throw new Error(response.message || 'Failed to fetch repositories');
             }
@@ -160,17 +289,19 @@ export const BitbucketProvider: React.FC<BitbucketProviderProps> = ({ children }
         }
     };
 
-    const fetchPullRequests = useCallback(async (page = 1, pagelen = 20) => {
-        if (!isAuthenticated) return;
+    const fetchPullRequests = useCallback(async (repository: string, page = 1, pagelen = 20) => {
+        if (!isAuthenticated || !repository) return;
 
         try {
             setLoading(true);
             setError(null);
 
-            const response = await apiService.getPullRequests(undefined, page, pagelen);
+            console.log(`🔍 Fetching PRs for repository: ${repository}`);
+            const response = await apiService.getPullRequests(repository, page, pagelen);
             if (response.success && response.data) {
                 setPullRequests(response.data as BitbucketPullRequest[]);
                 setPullRequestsPagination((response as any).pagination || null);
+                console.log(`✅ Loaded ${response.data.length} PRs for ${repository}`);
             } else {
                 throw new Error(response.message || 'Failed to fetch pull requests');
             }
@@ -188,7 +319,8 @@ export const BitbucketProvider: React.FC<BitbucketProviderProps> = ({ children }
     }, [isAuthenticated]);
 
     const refreshData = async () => {
-        await Promise.all([fetchRepositories(), fetchPullRequests()]);
+        await fetchRepositories();
+        // Don't automatically fetch PRs - let the user select a repository first
     };
 
     const value: BitbucketContextType = {

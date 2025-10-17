@@ -27,7 +27,7 @@ const PRFilters: React.FC<PRFiltersProps> = ({
 }) => {
     const repositoryOptions = repositories.map(repo => ({
         value: repo,
-        label: repo === 'all' ? 'All Repositories' : repo
+        label: repo.split('/').pop() || repo // Show just the repository name, not the full path
     }));
 
     const statusOptions = [

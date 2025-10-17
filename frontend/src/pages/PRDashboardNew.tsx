@@ -35,7 +35,7 @@ const PRDashboardNew: React.FC = () => {
         refreshData
     } = useBitbucket();
 
-    const [selectedRepo, setSelectedRepo] = useState<string>('all');
+    const [selectedRepo, setSelectedRepo] = useState<string>('');
     const [selectedStatus, setSelectedStatus] = useState<string>('OPEN');
     const [selectedPRs, setSelectedPRs] = useState<string[]>([]);
     const [currentPage, setCurrentPage] = useState<number>(1);
@@ -49,10 +49,10 @@ const PRDashboardNew: React.FC = () => {
 
         return bitbucketPRs
             .filter(pr => {
-                // Filter by repository
-                if (selectedRepo !== 'all') {
-                    const repoName = pr.source.repository.name;
-                    if (repoName !== selectedRepo) return false;
+                // Filter by repository - compare with full_name since selectedRepo now contains full_name
+                if (selectedRepo) {
+                    const repoFullName = pr.source.repository.full_name;
+                    if (repoFullName !== selectedRepo) return false;
                 }
 
                 // Filter by status
@@ -78,15 +78,27 @@ const PRDashboardNew: React.FC = () => {
     // Get filtered PRs
     const filteredPRs = convertBitbucketPRs(pullRequests || []);
 
-    // Get repository names for filter
-    const repositoryNames = ['all', ...(repositories || []).map(repo => repo.name)];
+    // Get repository names for filter (no "all" option)
+    const repositoryNames = (repositories || []).map(repo => repo.full_name);
 
-    // Load PRs when authenticated or page changes
+    // Helper function to get display name from full name
+    const getRepositoryDisplayName = (fullName: string) => {
+        return fullName.split('/').pop() || fullName;
+    };
+
+    // Set default repository when repositories are loaded
     useEffect(() => {
-        if (isAuthenticated) {
-            fetchPullRequests(currentPage, itemsPerPage);
+        if (repositories && repositories.length > 0 && !selectedRepo) {
+            setSelectedRepo(repositories[0].full_name);
         }
-    }, [isAuthenticated, currentPage, itemsPerPage, fetchPullRequests]);
+    }, [repositories, selectedRepo]);
+
+    // Load PRs when authenticated, repository changes, or page changes
+    useEffect(() => {
+        if (isAuthenticated && selectedRepo) {
+            fetchPullRequests(selectedRepo, currentPage, itemsPerPage);
+        }
+    }, [isAuthenticated, selectedRepo, currentPage, itemsPerPage, fetchPullRequests]);
 
     const handlePRSelect = (prId: string) => {
         setSelectedPRs(prev =>
@@ -162,7 +174,9 @@ const PRDashboardNew: React.FC = () => {
             return (
                 <div className="text-center py-12">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">Loading pull requests...</h3>
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">
+                        Loading pull requests from {getRepositoryDisplayName(selectedRepo)}...
+                    </h3>
                     <p className="text-gray-600">Please wait while we fetch your data.</p>
                 </div>
             );
@@ -192,7 +206,7 @@ const PRDashboardNew: React.FC = () => {
                     <h3 className="text-lg font-medium text-gray-900 mb-2">No pull requests found</h3>
                     <p className="text-gray-600">
                         {pullRequests.length === 0
-                            ? "No pull requests found in your Bitbucket repositories. Try refreshing or check your repositories."
+                            ? `No pull requests found in ${getRepositoryDisplayName(selectedRepo)}. Try selecting a different repository or refreshing.`
                             : "Try adjusting your filters to see more pull requests."
                         }
                     </p>
@@ -335,10 +349,22 @@ const PRDashboardNew: React.FC = () => {
                         <div className="flex items-center justify-between">
                             <h2 className="text-xl font-semibold text-gray-900">
                                 Pull Requests ({filteredPRs.length})
+                                <span className="text-sm font-normal text-gray-600 ml-2">
+                                    from {getRepositoryDisplayName(selectedRepo)}
+                                </span>
                             </h2>
                             <div className="flex items-center space-x-2">
-                                <div className="w-2 h-2 bg-green-400 rounded-full"></div>
-                                <span className="text-sm text-gray-600">Live from Bitbucket</span>
+                                {loading ? (
+                                    <>
+                                        <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
+                                        <span className="text-sm text-gray-600">Loading...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+                                        <span className="text-sm text-gray-600">Live from Bitbucket</span>
+                                    </>
+                                )}
                             </div>
                         </div>
                     </div>

@@ -30,9 +30,11 @@ app.get('/api/test', (req, res) => {
 // Import and use routes
 import prRoutes from './routes/prRoutes';
 import bitbucketRoutes from './routes/bitbucketRoutes';
+import aiRoutes from './routes/aiRoutes';
 
 app.use('/api', prRoutes);
 app.use('/api/bitbucket', bitbucketRoutes);
+app.use('/api/ai', aiRoutes);
 
 // Start server
 app.listen(PORT, () => {

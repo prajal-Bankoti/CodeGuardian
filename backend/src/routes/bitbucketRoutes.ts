@@ -104,7 +104,10 @@ router.get('/pullrequests', async (req: Request, res: Response) => {
 
         // If repository is specified, get PRs for that repo
         if (repository && repository !== 'all') {
-            const response = await axios.get(`${BITBUCKET_API_BASE}/repositories/${repository}/pullrequests`, {
+            // URL decode the repository name
+            const repoName = Array.isArray(repository) ? repository[0] : repository;
+            const decodedRepository = decodeURIComponent(String(repoName));
+            const response = await axios.get(`${BITBUCKET_API_BASE}/repositories/${decodedRepository}/pullrequests`, {
                 headers: {
                     'Authorization': `Bearer ${access_token}`
                 },
@@ -222,7 +225,10 @@ router.get('/pullrequests/:repository/:prId', async (req: Request, res: Response
 
         console.log(`Fetching PR details for: ${repository}/${prId}`);
         
-        const response = await axios.get(`${BITBUCKET_API_BASE}/repositories/${repository}/pullrequests/${prId}`, {
+        // URL decode the repository name
+        const repoName = Array.isArray(repository) ? repository[0] : repository;
+        const decodedRepository = decodeURIComponent(String(repoName));
+        const response = await axios.get(`${BITBUCKET_API_BASE}/repositories/${decodedRepository}/pullrequests/${prId}`, {
             headers: {
                 'Authorization': `Bearer ${access_token}`
             }
@@ -258,7 +264,10 @@ router.get('/pullrequests/:repository/:prId/diff', async (req: Request, res: Res
 
         console.log(`Fetching PR diff for: ${repository}/${prId}`);
         
-        const response = await axios.get(`${BITBUCKET_API_BASE}/repositories/${repository}/pullrequests/${prId}/diff`, {
+        // URL decode the repository name
+        const repoName = Array.isArray(repository) ? repository[0] : repository;
+        const decodedRepository = decodeURIComponent(String(repoName));
+        const response = await axios.get(`${BITBUCKET_API_BASE}/repositories/${decodedRepository}/pullrequests/${prId}/diff`, {
             headers: {
                 'Authorization': `Bearer ${access_token}`
             }

@@ -4,7 +4,7 @@ import { apiService } from '../services/apiService';
 import { BitbucketPullRequest } from '../services/bitbucketService';
 import Button from '../components/common/Button';
 import Accordion from '../components/common/Accordion';
-import FileChanges from '../components/pr/FileChanges';
+import FileChangesWithGlobalAI from '../components/pr/FileChangesWithGlobalAI';
 
 const PRDetailView: React.FC = () => {
     const { repository, prId } = useParams<{ repository: string; prId: string }>();
@@ -189,10 +189,10 @@ const PRDetailView: React.FC = () => {
                             </Accordion>
                         )}
 
-                        {/* File Changes */}
+                        {/* File Changes with AI Review */}
                         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-                            <h2 className="text-xl font-semibold text-gray-900 mb-4">File Changes</h2>
-                            <FileChanges
+                            <h2 className="text-xl font-semibold text-gray-900 mb-4">File Changes with AI Review</h2>
+                            <FileChangesWithGlobalAI
                                 repository={repository || ''}
                                 prId={prId || ''}
                                 accessToken=""
