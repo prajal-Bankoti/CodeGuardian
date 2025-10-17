@@ -5,10 +5,10 @@ const router: Router = Router();
 
 /**
  * @route POST /api/ai/review
- * @desc Perform AI-powered code review on a diff
+ * @desc Perform AI-powered code review on a diff (redirected to global PR review)
  * @access Private (requires authentication)
  */
-router.post('/review', (req, res) => aiController.reviewCode(req, res));
+router.post('/review', (req, res) => aiController.reviewPullRequest(req, res));
 
 /**
  * @route POST /api/ai/review-pr
@@ -16,6 +16,13 @@ router.post('/review', (req, res) => aiController.reviewCode(req, res));
  * @access Private (requires authentication)
  */
 router.post('/review-pr', (req, res) => aiController.reviewPullRequest(req, res));
+
+/**
+ * @route POST /api/ai/download-report
+ * @desc Generate and download PDF report of AI code review
+ * @access Private (requires authentication)
+ */
+router.post('/download-report', (req, res) => aiController.downloadReport(req, res));
 
 /**
  * @route GET /api/ai/health

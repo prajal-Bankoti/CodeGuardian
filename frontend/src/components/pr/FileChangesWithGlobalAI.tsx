@@ -14,9 +14,10 @@ interface FileChangesWithGlobalAIProps {
     repository: string;
     prId: string;
     accessToken: string;
+    onReviewComplete?: (review: CodeReviewResponse) => void;
 }
 
-const FileChangesWithGlobalAI: React.FC<FileChangesWithGlobalAIProps> = ({ repository, prId }) => {
+const FileChangesWithGlobalAI: React.FC<FileChangesWithGlobalAIProps> = ({ repository, prId, onReviewComplete }) => {
     const [fileChanges, setFileChanges] = useState<FileChange[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -108,6 +109,9 @@ const FileChangesWithGlobalAI: React.FC<FileChangesWithGlobalAIProps> = ({ repos
             console.log('AI Review Result:', result);
             console.log('AI Comments:', result.comments);
             setGlobalReview(result);
+            if (onReviewComplete) {
+                onReviewComplete(result);
+            }
         } catch (err) {
             console.error('Error performing global review:', err);
             setError('Failed to perform AI review');
@@ -265,10 +269,47 @@ const FileChangesWithGlobalAI: React.FC<FileChangesWithGlobalAIProps> = ({ repos
                             </div>
                         )}
 
+                        {/* PR Overview */}
+                        {globalReview.prOverview && (
+                            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
+                                <h4 className="font-semibold mb-3 flex items-center text-blue-800">
+                                    📋 PR Overview
+                                </h4>
+                                <div className="space-y-3">
+                                    <div>
+                                        <h5 className="font-medium text-blue-700 mb-1">Title:</h5>
+                                        <p className="text-gray-800 text-sm">{globalReview.prOverview.title}</p>
+                                    </div>
+
+                                    {globalReview.prOverview.keyChanges?.length > 0 && (
+                                        <div>
+                                            <h5 className="font-medium text-blue-700 mb-1">Key Changes:</h5>
+                                            <ul className="list-disc list-inside ml-2 space-y-1">
+                                                {globalReview.prOverview.keyChanges.map((change, index) => (
+                                                    <li key={index} className="text-gray-700 text-sm">{change}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <h5 className="font-medium text-blue-700 mb-1">Impact:</h5>
+                                            <p className="text-gray-700 text-sm">{globalReview.prOverview.impact}</p>
+                                        </div>
+                                        <div>
+                                            <h5 className="font-medium text-blue-700 mb-1">Risk Level:</h5>
+                                            <p className="text-gray-700 text-sm">{globalReview.prOverview.riskLevel}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Summary */}
                         <div className="bg-gray-50 rounded-lg p-4">
                             <h4 className="font-semibold mb-2 flex items-center">
-                                📋 Summary
+                                📝 Summary
                             </h4>
                             <p className="text-gray-700 text-sm">{globalReview.summary}</p>
                         </div>
@@ -276,26 +317,64 @@ const FileChangesWithGlobalAI: React.FC<FileChangesWithGlobalAIProps> = ({ repos
                         {/* Global Suggestions */}
                         {globalReview.suggestions && (
                             <div className="bg-blue-50 rounded-lg p-4">
-                                <h4 className="font-semibold mb-2 flex items-center">
+                                <h4 className="font-semibold mb-3 flex items-center">
                                     💡 Global Suggestions
                                 </h4>
-                                <div className="space-y-2 text-sm">
-                                    {globalReview.suggestions.componentExtractions?.length > 0 && (
-                                        <div>
-                                            <strong>Component Extractions:</strong>
-                                            <ul className="list-disc list-inside ml-2">
-                                                {globalReview.suggestions.componentExtractions.map((suggestion, index) => (
-                                                    <li key={index}>{suggestion}</li>
+                                <div className="space-y-4 text-sm">
+                                    {globalReview.suggestions.immediateActions?.length > 0 && (
+                                        <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                                            <h5 className="font-medium text-red-800 mb-2 flex items-center">
+                                                🚨 Immediate Actions Required
+                                            </h5>
+                                            <ul className="list-disc list-inside ml-2 space-y-1">
+                                                {globalReview.suggestions.immediateActions.map((action, index) => (
+                                                    <li key={index} className="text-red-700">{action}</li>
                                                 ))}
                                             </ul>
                                         </div>
                                     )}
+
+                                    {globalReview.suggestions.componentExtractions?.length > 0 && (
+                                        <div>
+                                            <h5 className="font-medium text-blue-700 mb-2">Component Extractions:</h5>
+                                            <ul className="list-disc list-inside ml-2 space-y-1">
+                                                {globalReview.suggestions.componentExtractions.map((suggestion, index) => (
+                                                    <li key={index} className="text-gray-700">{suggestion}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+
                                     {globalReview.suggestions.bestPractices?.length > 0 && (
                                         <div>
-                                            <strong>Best Practices:</strong>
-                                            <ul className="list-disc list-inside ml-2">
+                                            <h5 className="font-medium text-blue-700 mb-2">Best Practices:</h5>
+                                            <ul className="list-disc list-inside ml-2 space-y-1">
                                                 {globalReview.suggestions.bestPractices.map((suggestion, index) => (
-                                                    <li key={index}>{suggestion}</li>
+                                                    <li key={index} className="text-gray-700">{suggestion}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+
+                                    {globalReview.suggestions.fileOrganizations?.length > 0 && (
+                                        <div>
+                                            <h5 className="font-medium text-blue-700 mb-2">File Organizations:</h5>
+                                            <ul className="list-disc list-inside ml-2 space-y-1">
+                                                {globalReview.suggestions.fileOrganizations.map((suggestion, index) => (
+                                                    <li key={index} className="text-gray-700">{suggestion}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+
+                                    {globalReview.suggestions.testingRecommendations?.length > 0 && (
+                                        <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                                            <h5 className="font-medium text-green-800 mb-2 flex items-center">
+                                                🧪 Testing Recommendations
+                                            </h5>
+                                            <ul className="list-disc list-inside ml-2 space-y-1">
+                                                {globalReview.suggestions.testingRecommendations.map((recommendation, index) => (
+                                                    <li key={index} className="text-green-700">{recommendation}</li>
                                                 ))}
                                             </ul>
                                         </div>
@@ -373,75 +452,125 @@ const FileChangesWithGlobalAI: React.FC<FileChangesWithGlobalAIProps> = ({ repos
                                     {/* Diff Content */}
                                     <div className="p-4 overflow-x-auto">
                                         <div className="text-sm font-mono">
-                                            {file.diff.split('\n').map((line, lineIndex) => {
-                                                const lineNumber = lineIndex + 1;
-                                                let lineClass = 'text-gray-300';
-                                                let bgClass = '';
+                                            {(() => {
+                                                // Fixed line number calculation - no more line 1 issues
+                                                const lines = file.diff.split('\n');
+                                                let currentHunkStart = 0;
+                                                let currentLineNumber = 0;
 
-                                                if (line.startsWith('+')) {
-                                                    lineClass = 'text-green-400';
-                                                    bgClass = 'bg-green-900/20';
-                                                } else if (line.startsWith('-')) {
-                                                    lineClass = 'text-red-400';
-                                                    bgClass = 'bg-red-900/20';
-                                                } else if (line.startsWith('@@')) {
-                                                    lineClass = 'text-blue-400';
-                                                    bgClass = 'bg-blue-900/20';
-                                                } else if (line.startsWith('diff --git') || line.startsWith('index ') || line.startsWith('+++') || line.startsWith('---')) {
-                                                    lineClass = 'text-gray-500';
-                                                }
+                                                return lines.map((line, lineIndex) => {
+                                                    let actualLineNumber = 0;
+                                                    let displayLineNumber: number | string = ''; // ALWAYS start with empty string
+                                                    let lineClass = 'text-gray-300';
+                                                    let bgClass = '';
 
-                                                // Find comments for this specific line
-                                                const inlineComments = fileComments.filter(
-                                                    comment => comment.lineNumber === lineNumber
-                                                );
+                                                    // ALWAYS hide line numbers for diff metadata - NO EXCEPTIONS
+                                                    if (line.startsWith('diff --git') ||
+                                                        line.startsWith('index ') ||
+                                                        line.startsWith('+++') ||
+                                                        line.startsWith('---') ||
+                                                        (line.includes('a/') && line.includes('b/'))) {
+                                                        lineClass = 'text-gray-500';
+                                                        displayLineNumber = ''; // FORCE empty for all metadata
+                                                        return (
+                                                            <React.Fragment key={lineIndex}>
+                                                                <div className={`flex ${bgClass} hover:bg-gray-800/50`}>
+                                                                    <div className="w-12 text-right pr-4 text-gray-500 select-none text-xs leading-5">
+                                                                        {displayLineNumber}
+                                                                    </div>
+                                                                    <div className={`flex-1 ${lineClass} leading-5 whitespace-pre`}>
+                                                                        {line}
+                                                                    </div>
+                                                                </div>
+                                                            </React.Fragment>
+                                                        );
+                                                    }
 
-                                                return (
-                                                    <React.Fragment key={lineIndex}>
-                                                        <div className={`flex ${bgClass} hover:bg-gray-800/50`}>
-                                                            <div className="w-12 text-right pr-4 text-gray-500 select-none text-xs leading-5">
-                                                                {lineNumber}
+                                                    // Parse hunk header to get actual line numbers
+                                                    if (line.startsWith('@@')) {
+                                                        const hunkMatch = line.match(/@@ -(\d+),?\d* \+(\d+),?\d* @@/);
+                                                        if (hunkMatch) {
+                                                            currentHunkStart = parseInt(hunkMatch[2]); // Use new file start line
+                                                            currentLineNumber = currentHunkStart - 1; // Reset counter
+                                                        }
+                                                        lineClass = 'text-blue-400';
+                                                        bgClass = 'bg-blue-900/20';
+                                                        displayLineNumber = ''; // Hide line number for hunk headers
+                                                    } else if (line.startsWith('+')) {
+                                                        currentLineNumber++;
+                                                        actualLineNumber = currentLineNumber;
+                                                        displayLineNumber = actualLineNumber; // Show real file line number
+                                                        lineClass = 'text-green-400';
+                                                        bgClass = 'bg-green-900/20';
+                                                    } else if (line.startsWith('-')) {
+                                                        // For removed lines, don't increment the new file line counter
+                                                        lineClass = 'text-red-400';
+                                                        bgClass = 'bg-red-900/20';
+                                                        displayLineNumber = ''; // Hide line number for removed lines
+                                                    } else {
+                                                        // Context line - only show line number if we're inside a hunk
+                                                        if (currentHunkStart > 0) {
+                                                            currentLineNumber++;
+                                                            actualLineNumber = currentLineNumber;
+                                                            displayLineNumber = actualLineNumber; // Show real file line number
+                                                        } else {
+                                                            displayLineNumber = ''; // Hide line number for lines before first hunk
+                                                        }
+                                                    }
+
+                                                    // Find comments for this specific line using actual line number
+                                                    const inlineComments = fileComments.filter(
+                                                        comment => comment.lineNumber === actualLineNumber
+                                                    );
+
+
+                                                    return (
+                                                        <React.Fragment key={lineIndex}>
+                                                            <div className={`flex ${bgClass} hover:bg-gray-800/50`}>
+                                                                <div className="w-12 text-right pr-4 text-gray-500 select-none text-xs leading-5">
+                                                                    {displayLineNumber}
+                                                                </div>
+                                                                <div className={`flex-1 ${lineClass} leading-5 whitespace-pre`}>
+                                                                    {line}
+                                                                </div>
                                                             </div>
-                                                            <div className={`flex-1 ${lineClass} leading-5 whitespace-pre`}>
-                                                                {line}
-                                                            </div>
-                                                        </div>
-                                                        {/* Inline AI Comments - Bitbucket Style */}
-                                                        {inlineComments && inlineComments.length > 0 && (
-                                                            <div className="ml-12 mb-2">
-                                                                {inlineComments.map((comment, commentIndex) => (
-                                                                    <div key={commentIndex} className="bg-blue-50 border-l-4 border-blue-400 p-3 mb-2 rounded-r-md">
-                                                                        <div className="flex items-start space-x-2">
-                                                                            <div className="flex-shrink-0">
-                                                                                <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
-                                                                                    <span className="text-white text-xs font-bold">AI</span>
-                                                                                </div>
-                                                                            </div>
-                                                                            <div className="flex-1 min-w-0">
-                                                                                <div className="flex items-center space-x-2 mb-1">
-                                                                                    <span className={`text-xs font-semibold px-2 py-1 rounded-full ${getCommentPriorityBadgeColor(comment.priority)}`}>
-                                                                                        {comment.priority} {comment.type}
-                                                                                    </span>
-                                                                                    <span className="text-xs text-gray-500">•</span>
-                                                                                    <span className="text-xs text-gray-500">Line {comment.lineNumber}</span>
-                                                                                </div>
-                                                                                <p className="text-sm text-gray-800 mb-1">{comment.message}</p>
-                                                                                {comment.suggestion && (
-                                                                                    <div className="bg-yellow-50 border border-yellow-200 rounded p-2 mt-2">
-                                                                                        <p className="text-xs text-yellow-800">
-                                                                                            <span className="font-semibold">💡 Suggestion:</span> {comment.suggestion}
-                                                                                        </p>
+                                                            {/* Inline AI Comments - Bitbucket Style */}
+                                                            {inlineComments && inlineComments.length > 0 && (
+                                                                <div className="ml-12 mb-2">
+                                                                    {inlineComments.map((comment, commentIndex) => (
+                                                                        <div key={commentIndex} className="bg-blue-50 border-l-4 border-blue-400 p-3 mb-2 rounded-r-md">
+                                                                            <div className="flex items-start space-x-2">
+                                                                                <div className="flex-shrink-0">
+                                                                                    <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
+                                                                                        <span className="text-white text-xs font-bold">AI</span>
                                                                                     </div>
-                                                                                )}
+                                                                                </div>
+                                                                                <div className="flex-1 min-w-0">
+                                                                                    <div className="flex items-center space-x-2 mb-1">
+                                                                                        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${getCommentPriorityBadgeColor(comment.priority)}`}>
+                                                                                            {comment.priority} {comment.type}
+                                                                                        </span>
+                                                                                        <span className="text-xs text-gray-500">•</span>
+                                                                                        <span className="text-xs text-gray-500">Line {comment.lineNumber}</span>
+                                                                                    </div>
+                                                                                    <p className="text-sm text-gray-800 mb-1">{comment.message}</p>
+                                                                                    {comment.suggestion && (
+                                                                                        <div className="bg-yellow-50 border border-yellow-200 rounded p-2 mt-2">
+                                                                                            <p className="text-xs text-yellow-800">
+                                                                                                <span className="font-semibold">💡 Suggestion:</span> {comment.suggestion}
+                                                                                            </p>
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
                                                                             </div>
                                                                         </div>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        )}
-                                                    </React.Fragment>
-                                                );
-                                            })}
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </React.Fragment>
+                                                    );
+                                                });
+                                            })()}
                                         </div>
                                     </div>
                                 </div>

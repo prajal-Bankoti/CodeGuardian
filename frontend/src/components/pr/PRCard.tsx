@@ -10,24 +10,16 @@ interface PullRequest {
     createdDate: string;
     updatedDate: string;
     reviewers: string[];
-    aiReviewed: boolean;
-    aiSuggestions: number;
 }
 
 interface PRCardProps {
     pr: PullRequest;
-    isSelected: boolean;
-    onSelect: (prId: string) => void;
     onViewPR: (prId: string) => void;
-    onAIReview: (prId: string) => void;
 }
 
 const PRCard: React.FC<PRCardProps> = ({
     pr,
-    isSelected,
-    onSelect,
     onViewPR,
-    onAIReview,
 }) => {
     const getStatusColor = (status: string) => {
         switch (status) {
@@ -43,19 +35,9 @@ const PRCard: React.FC<PRCardProps> = ({
     };
 
     return (
-        <div
-            className={`p-6 hover:bg-gray-50 transition-all duration-200 border-b border-gray-100 last:border-b-0 ${isSelected ? 'bg-blue-50 border-l-4 border-blue-500 shadow-sm' : ''
-                }`}
-        >
+        <div className="p-6 hover:bg-gray-50 transition-all duration-200 border-b border-gray-100 last:border-b-0">
             <div className="flex items-start justify-between">
                 <div className="flex items-start space-x-4 flex-1">
-                    <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => onSelect(pr.id)}
-                        className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                        aria-label={`Select pull request: ${pr.title}`}
-                    />
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center space-x-3 mb-2">
                             <h3 className="text-lg font-medium text-gray-900 truncate">
@@ -64,14 +46,6 @@ const PRCard: React.FC<PRCardProps> = ({
                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(pr.status)}`}>
                                 {pr.status}
                             </span>
-                            {pr.aiReviewed && (
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                                    <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" />
-                                    </svg>
-                                    AI Reviewed
-                                </span>
-                            )}
                         </div>
 
                         <div className="flex items-center space-x-6 text-sm text-gray-600">
@@ -93,14 +67,6 @@ const PRCard: React.FC<PRCardProps> = ({
                                 </svg>
                                 {new Date(pr.createdDate).toLocaleDateString()}
                             </div>
-                            {pr.aiSuggestions > 0 && (
-                                <div className="flex items-center text-purple-600">
-                                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                                    </svg>
-                                    {pr.aiSuggestions} suggestions
-                                </div>
-                            )}
                         </div>
 
                         <div className="mt-3 flex items-center space-x-4">
@@ -118,11 +84,6 @@ const PRCard: React.FC<PRCardProps> = ({
                     <Button variant="secondary" size="sm" onClick={() => onViewPR(pr.id)}>
                         View PR
                     </Button>
-                    {!pr.aiReviewed && (
-                        <Button variant="primary" size="sm" onClick={() => onAIReview(pr.id)}>
-                            AI Review
-                        </Button>
-                    )}
                 </div>
             </div>
         </div>

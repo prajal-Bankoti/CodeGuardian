@@ -25,7 +25,6 @@ const PRDashboardNew: React.FC = () => {
     const navigate = useNavigate();
     const {
         isAuthenticated,
-        user,
         repositories,
         pullRequests,
         loading,
@@ -37,9 +36,8 @@ const PRDashboardNew: React.FC = () => {
 
     const [selectedRepo, setSelectedRepo] = useState<string>('');
     const [selectedStatus, setSelectedStatus] = useState<string>('OPEN');
-    const [selectedPRs, setSelectedPRs] = useState<string[]>([]);
     const [currentPage, setCurrentPage] = useState<number>(1);
-    const [itemsPerPage, setItemsPerPage] = useState<number>(10);
+    const [itemsPerPage] = useState<number>(10);
 
     // Convert Bitbucket PRs to our format
     const convertBitbucketPRs = (bitbucketPRs: BitbucketPullRequest[]): PullRequest[] => {
@@ -100,60 +98,10 @@ const PRDashboardNew: React.FC = () => {
         }
     }, [isAuthenticated, selectedRepo, currentPage, itemsPerPage, fetchPullRequests]);
 
-    const handlePRSelect = (prId: string) => {
-        setSelectedPRs(prev =>
-            prev.includes(prId)
-                ? prev.filter(id => id !== prId)
-                : [...prev, prId]
-        );
-    };
 
-    const handleSelectAll = () => {
-        if (selectedPRs.length === filteredPRs.length) {
-            setSelectedPRs([]);
-        } else {
-            setSelectedPRs(filteredPRs.map(pr => pr.id));
-        }
-    };
-
-    const handleAIReview = async () => {
-        if (selectedPRs.length === 0) {
-            alert('Please select at least one PR to review');
-            return;
-        }
-
-        try {
-            const response = await fetch('http://localhost:5000/api/prs/ai-review', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ prIds: selectedPRs }),
-            });
-
-            const data = await response.json();
-
-            if (data.success) {
-                alert(`AI review completed for ${data.data.length} PR(s)!`);
-                refreshData();
-                setSelectedPRs([]);
-            } else {
-                alert(`Error: ${data.message}`);
-            }
-        } catch (err) {
-            alert('Failed to perform AI review');
-        }
-    };
 
     const handlePageChange = (page: number) => {
         setCurrentPage(page);
-        setSelectedPRs([]); // Clear selection when changing pages
-    };
-
-    const handleItemsPerPageChange = (newItemsPerPage: number) => {
-        setItemsPerPage(newItemsPerPage);
-        setCurrentPage(1); // Reset to first page
-        setSelectedPRs([]); // Clear selection
     };
 
     const handleViewPR = (prId: string) => {
@@ -164,10 +112,6 @@ const PRDashboardNew: React.FC = () => {
         }
     };
 
-    const handleSingleAIReview = (prId: string) => {
-        setSelectedPRs([prId]);
-        handleAIReview();
-    };
 
     const renderContent = () => {
         if (loading) {
@@ -229,10 +173,7 @@ const PRDashboardNew: React.FC = () => {
                     <PRCard
                         key={pr.id}
                         pr={pr}
-                        isSelected={selectedPRs.includes(pr.id)}
-                        onSelect={handlePRSelect}
                         onViewPR={handleViewPR}
-                        onAIReview={handleSingleAIReview}
                     />
                 ))}
             </div>
@@ -289,28 +230,19 @@ const PRDashboardNew: React.FC = () => {
     return (
         <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
             <div className="container-custom py-8">
-                {/* Header Section */}
+                {/* Page Header */}
                 <div className="mb-8">
                     <div className="flex items-center justify-between">
                         <div>
-                            <h1 className="text-4xl font-bold text-gray-900 mb-2">PR Dashboard</h1>
-                            <p className="text-lg text-gray-600">
+                            <h1 className="text-3xl font-bold text-gray-900 mb-2">PR Dashboard</h1>
+                            <p className="text-gray-600">
                                 Manage and review pull requests with AI assistance
-                                {user && (
-                                    <span className="block text-sm text-gray-500 mt-1">
-                                        Connected as {user.display_name}
-                                    </span>
-                                )}
                             </p>
                         </div>
                         <div className="flex items-center space-x-4">
                             <div className="text-right">
                                 <div className="text-sm text-gray-500">Total PRs</div>
                                 <div className="text-2xl font-bold text-blue-600">{filteredPRs.length}</div>
-                            </div>
-                            <div className="text-right">
-                                <div className="text-sm text-gray-500">Selected</div>
-                                <div className="text-2xl font-bold text-green-600">{selectedPRs.length}</div>
                             </div>
                             <Button
                                 variant="secondary"
@@ -334,12 +266,8 @@ const PRDashboardNew: React.FC = () => {
                         selectedRepo={selectedRepo}
                         selectedStatus={selectedStatus}
                         repositories={repositoryNames}
-                        selectedCount={selectedPRs.length}
-                        totalCount={filteredPRs.length}
                         onRepoChange={setSelectedRepo}
                         onStatusChange={setSelectedStatus}
-                        onSelectAll={handleSelectAll}
-                        onAIReview={handleAIReview}
                     />
                 </div>
 

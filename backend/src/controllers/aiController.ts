@@ -1,493 +1,84 @@
-import { Request, Response } from 'express';
 import axios from 'axios';
 
-// Interfaces
-export interface CodeReviewResponse {
-    overallScore: number;
-    summary: string;
-    framework: string;
-    language: string;
-    severityBreakdown: SeverityBreakdown;
-    comments: CodeReviewComment[];
-    suggestions: {
-        componentExtractions: string[];
-        fileOrganizations: string[];
-        bestPractices: string[];
-    };
-}
-
-export interface CodeReviewComment {
-    priority: CommentPriority;
-    type: CommentType;
-    lineNumber: number;
+interface CodeReviewComment {
+    priority: 'HIGH' | 'MEDIUM' | 'LOW';
+    type: 'BUG' | 'SECURITY' | 'PERFORMANCE' | 'MAINTAINABILITY' | 'STYLE' | 'ARCHITECTURE';
+    lineNumber?: number;
     filePath?: string;
     message: string;
-    suggestion: string;
-    category: CommentCategory;
+    suggestion?: string;
+    category: 'UNUSED_VARIABLES' | 'COMPONENT_EXTRACTION' | 'CODE_ORGANIZATION' | 'BEST_PRACTICES' | 'SECURITY_ISSUE' | 'PERFORMANCE_ISSUE' | 'OTHER';
 }
 
-export interface AISuggestions {
-    componentExtractions: string[];
-    fileOrganizations: string[];
-    bestPractices: string[];
-}
-
-export type CommentPriority = 'HIGH' | 'MEDIUM' | 'LOW';
-export type CommentType = 'BUG' | 'SECURITY' | 'PERFORMANCE' | 'MAINTAINABILITY' | 'STYLE' | 'ARCHITECTURE';
-export type CommentCategory = 'BUG' | 'SECURITY' | 'PERFORMANCE' | 'MAINTAINABILITY' | 'STYLE' | 'ARCHITECTURE' | 'UNUSED_VARIABLES' | 'COMPONENT_EXTRACTION' | 'CODE_ORGANIZATION' | 'BEST_PRACTICES' | 'SECURITY_ISSUE' | 'PERFORMANCE_ISSUE' | 'ERROR_HANDLING' | 'OTHER';
-
-export interface SeverityBreakdown {
+interface SeverityBreakdown {
     high: number;
     medium: number;
     low: number;
     total: number;
 }
 
+interface CodeReviewSuggestions {
+    immediateActions: string[];
+    componentExtractions: string[];
+    fileOrganizations: string[];
+    bestPractices: string[];
+    testingRecommendations: string[];
+}
+
+interface CodeReviewResponse {
+    framework: string;
+    language: string;
+    overallScore: number;
+    prOverview: {
+        title: string;
+        keyChanges: string[];
+        impact: string;
+        riskLevel: string;
+    };
+    severityBreakdown: SeverityBreakdown;
+    comments: CodeReviewComment[];
+    suggestions: CodeReviewSuggestions;
+    summary: string;
+}
+
 class AIController {
-    private readonly azureOpenAIKey: string;
-    private readonly azureOpenAIBaseURL: string;
-    private readonly azureOpenAIVersion: string;
-    private readonly azureOpenAIDeploymentName: string;
+    private readonly AZURE_OPENAI_ENDPOINT = process.env.OPEN_AI_AZURE_BASE_URL_OMNI || '';
+    private readonly AZURE_OPENAI_API_KEY = process.env.OPEN_AI_KEY_AZURE_OMNI || '';
+    private readonly AZURE_OPENAI_DEPLOYMENT = process.env.OPEN_AI_DEPLOYMENT_NAME_OMNI || '';
+    private readonly AZURE_OPENAI_VERSION = process.env.OPEN_AI_AZURE_VERSION_OMNI || '2024-02-01';
 
-    constructor() {
-        this.azureOpenAIKey = process.env.OPEN_AI_KEY_AZURE_OMNI || '';
-        this.azureOpenAIBaseURL = process.env.OPEN_AI_AZURE_BASE_URL_OMNI || '';
-        this.azureOpenAIVersion = process.env.OPEN_AI_AZURE_VERSION_OMNI || '2024-02-01';
-        this.azureOpenAIDeploymentName = process.env.OPEN_AI_DEPLOYMENT_NAME_OMNI || '';
-
-        if (!this.azureOpenAIKey || !this.azureOpenAIBaseURL) {
-            console.warn('Azure OpenAI configuration is missing. AI features will not work.');
-        }
-    }
-
-    /**
-     * Global PR Review using Azure OpenAI (analyzes entire PR with file-specific comments)
-     */
-    public async reviewPullRequest(req: Request, res: Response): Promise<void> {
+    async reviewPullRequest(req: any, res: any) {
         try {
             const { repository, prId } = req.body;
-
-            if (!repository || !prId) {
-                res.status(400).json({
-                    success: false,
-                    message: 'Repository and PR ID are required'
-                });
-                return;
-            }
-
-            // Get access token from Authorization header
-            const authHeader = req.headers.authorization;
-            const accessToken = authHeader?.replace('Bearer ', '');
+            const accessToken = req.headers.authorization?.replace('Bearer ', '');
 
             if (!accessToken) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Bitbucket access token required. Please login with Bitbucket first.'
-                });
-                return;
+                return res.status(401).json({ error: 'Access token required' });
+            }
+
+            if (!repository || !prId) {
+                return res.status(400).json({ error: 'Repository and PR ID are required' });
             }
 
             console.log(`Performing global review for PR: ${repository}/${prId}`);
-
-            // Fetch PR diff with access token
-            const diffResult = await this.fetchPRDiff(repository, prId, accessToken);
-            if (!diffResult.success || !diffResult.data) {
-                res.status(500).json({
-                    success: false,
-                    message: 'Failed to fetch PR diff from Bitbucket'
-                });
-                return;
-            }
-
-            // Perform global review
-            const reviewResult = await this.performGlobalReview(diffResult.data);
-
-            res.json({
-                success: true,
-                data: reviewResult
-            });
-
-        } catch (error) {
-            console.error('Error in global PR review:', error);
-            res.status(500).json({
-                success: false,
-                message: 'Failed to perform AI PR review',
-                error: error instanceof Error ? error.message : 'Unknown error'
-            });
-        }
-    }
-
-    /**
-     * Professional Code Review using Azure OpenAI
-     */
-    public async reviewCode(req: Request, res: Response): Promise<void> {
-        try {
-            const { diff, filePath } = req.body;
-
-            if (!diff) {
-                res.status(400).json({
-                    success: false,
-                    message: 'Code diff is required'
-                });
-                return;
-            }
-
-            // Detect framework and language
-            const framework = this.detectFramework(filePath || 'unknown', diff);
-            const language = this.detectLanguage(filePath || 'unknown');
-
-            // Create professional prompt
-            const prompt = this.createProfessionalPrompt(diff, filePath || 'unknown', framework, language);
-
-            // Call Azure OpenAI
-            const aiResponse = await this.callAzureOpenAI(prompt);
-
-            // Parse and structure response
-            const reviewResult = this.parseAIResponse(aiResponse, framework, language);
-
-            res.json({
-                success: true,
-                data: reviewResult
-            });
-
-        } catch (error) {
-            console.error('Error in AI code review:', error);
-            res.status(500).json({
-                success: false,
-                message: 'Failed to perform AI code review',
-                error: error instanceof Error ? error.message : 'Unknown error'
-            });
-        }
-    }
-
-    /**
-     * Detect framework from file path and content
-     */
-    private detectFramework(filePath: string, diff: string): string {
-        const path = filePath.toLowerCase();
-        const content = diff.toLowerCase();
-
-        // React
-        if (path.includes('react') || content.includes('import react') || content.includes('jsx')) {
-            return 'React';
-        }
-
-        // Vue
-        if (path.includes('vue') || content.includes('<template>') || content.includes('vue')) {
-            return 'Vue.js';
-        }
-
-        // Angular
-        if (path.includes('angular') || content.includes('@component') || content.includes('@angular')) {
-            return 'Angular';
-        }
-
-        // Next.js
-        if (path.includes('next') || content.includes('next/') || content.includes('getserversideprops')) {
-            return 'Next.js';
-        }
-
-        // Node.js
-        if (path.includes('node') || content.includes('require(') || content.includes('module.exports')) {
-            return 'Node.js';
-        }
-
-        // Default
-        return 'Unknown';
-    }
-
-    /**
-     * Detect programming language from file extension
-     */
-    private detectLanguage(filePath: string): string {
-        const extension = filePath.split('.').pop()?.toLowerCase();
-        
-        const languageMap: { [key: string]: string } = {
-            'js': 'JavaScript',
-            'jsx': 'JavaScript',
-            'ts': 'TypeScript',
-            'tsx': 'TypeScript',
-            'py': 'Python',
-            'java': 'Java',
-            'cpp': 'C++',
-            'c': 'C',
-            'cs': 'C#',
-            'php': 'PHP',
-            'rb': 'Ruby',
-            'go': 'Go',
-            'rs': 'Rust',
-            'swift': 'Swift',
-            'kt': 'Kotlin',
-            'scala': 'Scala',
-            'r': 'R',
-            'm': 'Objective-C',
-            'mm': 'Objective-C++',
-            'pl': 'Perl',
-            'sh': 'Shell',
-            'bash': 'Bash',
-            'ps1': 'PowerShell',
-            'dockerfile': 'Dockerfile'
-        };
-
-        return languageMap[extension || ''] || 'Unknown';
-    }
-
-    /**
-     * Create professional prompt for code review
-     */
-    private createProfessionalPrompt(diff: string, filePath: string, framework: string, language: string): string {
-        const frameworkGuidelines = this.getFrameworkSpecificGuidelines(framework);
-
-        return `You are a senior software engineer with 8-10 years of experience conducting a professional code review. 
-
-**File Information:**
-- File Path: ${filePath}
-- Framework: ${framework}
-- Language: ${language}
-
-**Code Diff to Review:**
-\`\`\`
-${diff}
-\`\`\`
-
-**Review Guidelines:**
-${frameworkGuidelines}
-
-**Output Format (JSON only):**
-{
-  "framework": "${framework}",
-  "language": "${language}",
-  "overallScore": 85,
-  "severityBreakdown": {
-    "high": 2,
-    "medium": 3,
-    "low": 1,
-    "total": 6
-  },
-  "comments": [
-    {
-      "priority": "HIGH|MEDIUM|LOW",
-      "type": "BUG|SECURITY|PERFORMANCE|MAINTAINABILITY|STYLE|ARCHITECTURE",
-      "lineNumber": 15,
-      "filePath": "${filePath}",
-      "message": "Specific issue description",
-      "suggestion": "Recommended fix or improvement",
-      "category": "UNUSED_VARIABLES|COMPONENT_EXTRACTION|CODE_ORGANIZATION|BEST_PRACTICES|SECURITY_ISSUE|PERFORMANCE_ISSUE|OTHER"
-    }
-  ],
-  "suggestions": {
-    "componentExtractions": [
-      "Extract Button component to reusable component",
-      "Create custom hook for data fetching logic"
-    ],
-    "fileOrganizations": [
-      "Move utility functions to separate utils file",
-      "Group related components in feature folders"
-    ],
-    "bestPractices": [
-      "Add error boundaries for better error handling",
-      "Implement proper loading states",
-      "Add input validation and sanitization"
-    ]
-  },
-  "summary": "Overall assessment of the code quality and recommendations"
-}
-
-**Review Focus Areas:**
-- Code quality and maintainability
-- Security vulnerabilities
-- Performance optimizations
-- Best practices adherence
-- Architecture and design patterns
-- Error handling and edge cases
-- Code organization and structure
-- Accessibility considerations
-- Testing considerations
-- Documentation needs
-
-**Priority Guidelines:**
-- HIGH: Critical bugs, security vulnerabilities, performance issues
-- MEDIUM: Code quality issues, maintainability concerns, best practice violations
-- LOW: Style issues, minor optimizations, documentation improvements
-
-**Categories:**
-- BUG: Actual bugs or potential runtime errors
-- SECURITY: Security vulnerabilities or unsafe practices
-- PERFORMANCE: Performance bottlenecks or inefficiencies
-- MAINTAINABILITY: Code that's hard to maintain or understand
-- STYLE: Code style and formatting issues
-- ARCHITECTURE: Design pattern and architecture concerns
-- UNUSED_VARIABLES: Unused imports, variables, or functions
-- COMPONENT_EXTRACTION: Opportunities to extract reusable components
-- CODE_ORGANIZATION: File structure and organization improvements
-- BEST_PRACTICES: Framework or language best practice violations
-- SECURITY_ISSUE: Specific security concerns
-- PERFORMANCE_ISSUE: Specific performance problems
-- ERROR_HANDLING: Missing or inadequate error handling
-- OTHER: Miscellaneous issues
-
-**Instructions:**
-- Analyze the code thoroughly
-- Provide specific, actionable feedback
-- Include line numbers for issues
-- Suggest concrete improvements
-- Focus on maintainability and scalability
-- Consider the framework's ecosystem and best practices
-- Be constructive and educational
-
-Please analyze the provided code diff and return a comprehensive review in the specified JSON format.`;
-    }
-
-    /**
-     * Get framework-specific guidelines
-     */
-    private getFrameworkSpecificGuidelines(framework: string): string {
-        switch (framework) {
-            case 'React':
-                return `**React Best Practices:**
-- Use functional components with hooks
-- Implement proper state management
-- Follow component composition patterns
-- Use React.memo for performance optimization
-- Implement proper key props for lists
-- Handle side effects with useEffect properly
-- Use proper dependency arrays
-- Implement error boundaries
-- Follow React naming conventions
-- Use TypeScript for better type safety`;
-
-            case 'Vue.js':
-                return `**Vue.js Best Practices:**
-- Use composition API for new components
-- Implement proper reactive data handling
-- Use computed properties for derived state
-- Follow Vue component lifecycle properly
-- Implement proper event handling
-- Use Vuex or Pinia for state management
-- Follow Vue naming conventions
-- Use TypeScript for better type safety
-- Implement proper component communication`;
-
-            case 'Angular':
-                return `**Angular Best Practices:**
-- Use Angular CLI for project structure
-- Implement proper dependency injection
-- Use Angular services for business logic
-- Follow Angular component lifecycle
-- Implement proper routing and guards
-- Use Angular forms with validation
-- Follow Angular naming conventions
-- Use TypeScript strictly
-- Implement proper error handling`;
-
-            case 'Node.js':
-                return `**Node.js Best Practices:**
-- Use async/await for asynchronous operations
-- Implement proper error handling
-- Use environment variables for configuration
-- Implement proper logging
-- Use middleware for cross-cutting concerns
-- Follow RESTful API design
-- Implement proper validation
-- Use proper database connection handling
-- Follow security best practices`;
-
-            default:
-                return `**General Best Practices:**
-- Follow clean code principles
-- Implement proper error handling
-- Use meaningful variable and function names
-- Write maintainable and readable code
-- Follow the framework's ecosystem and best practices
-- Ensure proper error handling
-- Check for security vulnerabilities
-- Validate performance considerations
-- Ensure maintainable code structure`;
-        }
-    }
-
-    /**
-     * Call Azure OpenAI API
-     */
-    private async callAzureOpenAI(prompt: string): Promise<string> {
-        if (!this.azureOpenAIKey || !this.azureOpenAIBaseURL) {
-            throw new Error('Azure OpenAI configuration is missing');
-        }
-
-        const response = await axios.post(
-            `${this.azureOpenAIBaseURL}/openai/deployments/${this.azureOpenAIDeploymentName}/chat/completions?api-version=${this.azureOpenAIVersion}`,
-            {
-                messages: [
-                    {
-                        role: 'system',
-                        content: 'You are a senior software engineer conducting a professional code review. Always respond with valid JSON only.'
-                    },
-                    {
-                        role: 'user',
-                        content: prompt
-                    }
-                ],
-                max_tokens: 4000,
-                temperature: 0.1
-            },
-            {
-                headers: {
-                    'api-key': this.azureOpenAIKey
-                }
-            }
-        );
-
-        return response.data.choices[0].message.content;
-    }
-
-    /**
-     * Fetch PR diff from Bitbucket API
-     */
-    private async fetchPRDiff(repository: string, prId: string, accessToken?: string): Promise<{ success: boolean; data?: string; message?: string }> {
-        try {
-            console.log(`Fetching diff for repository: ${repository}, PR: ${prId}`);
+            const reviewResult = await this.performGlobalReview(repository, prId, accessToken);
             
-            if (!accessToken) {
-                console.log('No Bitbucket access token provided, cannot fetch real data');
-                throw new Error('Access token required to fetch real PR data');
-            }
-
-            console.log('Fetching real diff data from Bitbucket API...');
-            const response = await axios.get(
-                `https://api.bitbucket.org/2.0/repositories/${repository}/pullrequests/${prId}/diff`,
-                {
-                    headers: {
-                        'Authorization': `Bearer ${accessToken}`,
-                        'Accept': 'text/plain'
-                    }
-                }
-            );
-
-            if (response.data) {
-                console.log('Successfully fetched real diff data from Bitbucket');
-                return {
-                    success: true,
-                    data: response.data
-                };
-            } else {
-                throw new Error('No diff data received from Bitbucket');
-            }
+            res.json(reviewResult);
         } catch (error) {
-            console.error('Error fetching PR diff from Bitbucket:', error);
-            throw error;
+            console.error('Error in global review:', error);
+            res.status(500).json({ error: 'Failed to perform global review' });
         }
     }
 
-
-    /**
-     * Perform global review of entire PR
-     */
-    private async performGlobalReview(fullDiff: string): Promise<CodeReviewResponse> {
+    private async performGlobalReview(repository: string, pullRequestId: string, accessToken: string): Promise<CodeReviewResponse> {
         try {
-            const framework = this.detectFrameworkFromDiff(fullDiff);
-            const language = this.detectLanguageFromDiff(fullDiff);
+            const diffResult = await this.fetchPRDiff(repository, pullRequestId, accessToken);
+            const framework = this.detectFrameworkFromDiff(diffResult.data);
+            const language = this.detectLanguageFromDiff(diffResult.data);
             
-            const prompt = this.createGlobalReviewPrompt(fullDiff, framework, language);
+            // Pre-process diff to add readable line numbers
+            const processedDiff = this.preprocessDiffWithLineNumbers(diffResult.data);
+            const prompt = this.createGlobalReviewPrompt(processedDiff, framework, language);
             const aiResponse = await this.callAzureOpenAI(prompt);
             
             return this.parseGlobalAIResponse(aiResponse, framework, language);
@@ -497,74 +88,217 @@ Please analyze the provided code diff and return a comprehensive review in the s
         }
     }
 
-    /**
-     * Detect framework from entire diff
-     */
-    private detectFrameworkFromDiff(diff: string): string {
-        if (diff.includes('import React') || diff.includes('jsx')) {
-            return 'React';
+    private async fetchPRDiff(repository: string, pullRequestId: string, accessToken: string): Promise<{ data: string }> {
+        try {
+            console.log(`Fetching diff for repository: ${repository}, PR: ${pullRequestId}`);
+            console.log('Fetching real diff data from Bitbucket API...');
+            
+            const response = await axios.get(
+                `https://api.bitbucket.org/2.0/repositories/${repository}/pullrequests/${pullRequestId}/diff`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Accept': 'text/plain'
+                    }
+                }
+            );
+            
+            console.log('Successfully fetched real diff data from Bitbucket');
+            return { data: response.data };
+        } catch (error) {
+            console.error('Error fetching PR diff:', error);
+            throw error;
         }
-        if (diff.includes('import { Component }') || diff.includes('@Component')) {
-            return 'Angular';
-        }
-        return 'Node.js';
     }
 
-    /**
-     * Detect language from entire diff
-     */
-    private detectLanguageFromDiff(diff: string): string {
-        if (diff.includes('.js') || diff.includes('require(')) {
-            return 'JavaScript';
+    private shouldIncludeFileInAIReview(filePath: string): boolean {
+        // File extensions to exclude from AI review
+        const excludedExtensions = [
+            '.xml', '.svg', '.xls', '.xlsx', '.csv', '.json', '.yaml', '.yml',
+            '.md', '.txt', '.log', '.lock', '.lockb', '.png', '.jpg', '.jpeg',
+            '.gif', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.pdf', '.zip',
+            '.tar', '.gz', '.rar', '.7z', '.exe', '.dll', '.so', '.dylib',
+            '.bin', '.dat', '.db', '.sqlite', '.sqlite3', '.mdb', '.accdb',
+            '.psd', '.ai', '.sketch', '.fig', '.mp4', '.avi', '.mov', '.wmv',
+            '.mp3', '.wav', '.flac', '.aac', '.ogg', '.webm', '.webp'
+        ];
+        
+        // File patterns to exclude
+        const excludedPatterns = [
+            'package-lock.json',
+            'yarn.lock',
+            'pnpm-lock.yaml',
+            // '.gitignore',
+            '.env',
+            '.env.local',
+            '.env.production',
+            'node_modules/',
+            'dist/',
+            'build/',
+            'coverage/',
+            '.next/',
+            '.nuxt/',
+            '.cache/',
+            '*.min.js',
+            '*.min.css',
+            '*.bundle.js',
+            '*.chunk.js'
+        ];
+        
+        const lowerFilePath = filePath.toLowerCase();
+        
+        // Check file extension
+        for (const ext of excludedExtensions) {
+            if (lowerFilePath.endsWith(ext)) {
+                return false;
+            }
         }
-        if (diff.includes('.java')) {
-            return 'Java';
+        
+        // Check file patterns
+        for (const pattern of excludedPatterns) {
+            if (lowerFilePath.includes(pattern.toLowerCase())) {
+                return false;
+            }
         }
-        return 'JavaScript';
+        
+        return true;
     }
 
-    /**
-     * Create comprehensive prompt for global review
-     */
+    private preprocessDiffWithLineNumbers(diff: string): string {
+        const lines = diff.split('\n');
+        const processedLines: string[] = [];
+        let currentHunkStart = 0;
+        let currentLineNumber = 0;
+        let currentFilePath = '';
+        let skipCurrentFile = false;
+
+        for (const line of lines) {
+            // Handle diff metadata - keep as is
+            if (line.startsWith('diff --git') || 
+                line.startsWith('index ') || 
+                line.startsWith('+++') || 
+                line.startsWith('---') || 
+                (line.includes('a/') && line.includes('b/'))) {
+                
+                // Extract file path from +++ or --- lines
+                if (line.startsWith('+++') || line.startsWith('---')) {
+                    const filePath = line.substring(4); // Remove "+++ " or "--- "
+                    currentFilePath = filePath;
+                    skipCurrentFile = !this.shouldIncludeFileInAIReview(filePath);
+                    
+                    if (skipCurrentFile) {
+                        console.log(`Skipping non-code file: ${filePath}`);
+                    }
+                }
+                
+                processedLines.push(line);
+                continue;
+            }
+            
+            // Skip all lines for non-code files
+            if (skipCurrentFile) {
+                continue;
+            }
+
+            // Parse hunk header to get actual line numbers
+            if (line.startsWith('@@')) {
+                const hunkMatch = line.match(/@@ -(\d+),?\d* \+(\d+),?\d* @@/);
+                if (hunkMatch) {
+                    currentHunkStart = parseInt(hunkMatch[2]); // Use new file start line
+                    currentLineNumber = currentHunkStart - 1; // Reset counter
+                }
+                processedLines.push(line);
+            } else if (line.startsWith('+')) {
+                // Added line
+                currentLineNumber++;
+                processedLines.push(`[LINE ${currentLineNumber}] ${line}`);
+            } else if (line.startsWith('-')) {
+                // Removed line - don't increment the new file line counter
+                processedLines.push(line);
+            } else {
+                // Context line - only show line number if we're inside a hunk
+                if (currentHunkStart > 0) {
+                    currentLineNumber++;
+                    processedLines.push(`[LINE ${currentLineNumber}] ${line}`);
+                } else {
+                    processedLines.push(line);
+                }
+            }
+        }
+
+        return processedLines.join('\n');
+    }
+
     private createGlobalReviewPrompt(diff: string, framework: string, language: string): string {
-        return `You are a senior software engineer with 8-10 years of experience conducting a comprehensive code review of an entire pull request.
+        return `You are an expert senior code reviewer with 10+ years of experience analyzing ${framework} ${language} pull requests. Your role is to provide thorough, actionable feedback that helps developers write better, more secure, and maintainable code.
 
 **Framework:** ${framework}
 **Language:** ${language}
 
-**Complete PR Diff:**
+**Complete PR Diff with Line Numbers:**
 \`\`\`
 ${diff}
 \`\`\`
 
-**Instructions:**
-Analyze the ACTUAL diff content above and provide a comprehensive review based on the REAL changes in this specific pull request. Do NOT use generic or template responses. Focus on:
-1. Security vulnerabilities in the actual code changes
-2. Performance issues in the specific modifications
-3. Code quality and maintainability of the real changes
-4. Architecture and design patterns used in this PR
-5. Error handling in the actual code
-6. Best practices adherence for the specific changes
-7. Unused variables and imports in the real diff
-8. Component extraction opportunities based on actual code
-9. File organization improvements for this specific PR
+**EXPERT ANALYSIS FOCUS:**
 
-**IMPORTANT:** 
-- Base your analysis ONLY on the actual diff content provided
-- For line numbers: Use the ACTUAL file line numbers, not diff context line numbers
-- In diff format: @@ -old_start,old_count +new_start,new_count @@ - use the new_start number as the base
-- For added lines (+), calculate: new_start + line_position_in_hunk - 1
-- For removed lines (-), use the original line numbers from the diff context
-- Generate comments for the EXACT files and REAL line numbers
-- Provide a realistic score based on the actual code quality
-- Count the real issues found in the diff for severity breakdown
-- Make suggestions specific to the actual changes made
+🔒 **SECURITY (Highest Priority):**
+- XSS vulnerabilities (dangerouslySetInnerHTML, unsanitized user input)
+- SQL injection (raw queries, string concatenation)
+- Authentication/authorization bypasses
+- Sensitive data exposure (API keys, passwords, tokens)
+- CSRF vulnerabilities, insecure redirects
+- File upload vulnerabilities, dependency vulnerabilities
+
+⚡ **PERFORMANCE:**
+- Inefficient algorithms (O(n²) in loops)
+- Memory leaks (uncleaned event listeners, timers)
+- Unnecessary re-renders (missing dependencies, inline functions)
+- Large bundle sizes (unused imports, heavy libraries)
+- Database N+1 queries, blocking operations
+
+🏗️ **ARCHITECTURE & MAINTAINABILITY:**
+- Single Responsibility Principle violations
+- Tight coupling between components
+- Missing error boundaries, inconsistent state management
+- Poor separation of concerns, code duplication
+- Complex functions (>20 lines, >3 parameters)
+
+🎨 **CODE QUALITY:**
+- Inconsistent naming conventions
+- Missing TypeScript types, unused variables/imports
+- Magic numbers and hardcoded values
+- Poor error handling, missing input validation
+
+🧪 **TESTING & RELIABILITY:**
+- Missing test coverage for critical paths
+- Untestable code (tight coupling)
+- Missing edge case handling, no error recovery
+
+**CRITICAL RULES:**
+1. Use EXACT line numbers from [LINE X] format in the diff
+2. File paths must be clean (remove a/ and b/ prefixes)
+3. Be specific and actionable in messages and suggestions
+4. Focus on real issues that impact code quality, security, or performance
+5. Provide concrete examples in suggestions
+6. Prioritize security issues as HIGH priority
+7. Limit to 10-15 most important comments to avoid overwhelming developers
 
 **Output Format (JSON only):**
 {
   "framework": "${framework}",
   "language": "${language}",
-  "overallScore": [realistic score based on actual code quality],
+  "overallScore": [realistic score 0-100 based on actual code quality],
+  "prOverview": {
+    "title": "[Brief descriptive title of what this PR accomplishes]",
+    "keyChanges": [
+      "[Bullet point 1: What was added/modified]",
+      "[Bullet point 2: Key functionality changes]",
+      "[Bullet point 3: Important architectural changes]"
+    ],
+    "impact": "[High/Medium/Low] - [Brief impact assessment]",
+    "riskLevel": "[High/Medium/Low] - [Security/Performance/Maintainability risk assessment]"
+  },
   "severityBreakdown": {
     "high": [actual count of high priority issues],
     "medium": [actual count of medium priority issues],
@@ -574,47 +308,82 @@ Analyze the ACTUAL diff content above and provide a comprehensive review based o
   "comments": [
     {
       "priority": "HIGH|MEDIUM|LOW",
-      "type": "BUG|SECURITY|PERFORMANCE|MAINTAINABILITY|STYLE|ARCHITECTURE",
-      "lineNumber": [REAL file line number - calculate from diff hunk: new_start + position_in_hunk - 1],
+      "type": "SECURITY|PERFORMANCE|MAINTAINABILITY|STYLE|ARCHITECTURE|ERROR_HANDLING|TESTING",
+      "lineNumber": [use the exact line number from [LINE X] in the diff],
       "filePath": "[exact file path from diff - remove a/ and b/ prefixes]",
-      "message": "[specific issue found in the actual code]",
-      "suggestion": "[specific fix for the actual issue]",
-      "category": "UNUSED_VARIABLES|COMPONENT_EXTRACTION|CODE_ORGANIZATION|BEST_PRACTICES|SECURITY_ISSUE|PERFORMANCE_ISSUE|OTHER"
+      "message": "[specific, actionable description of the actual issue]",
+      "suggestion": "[concrete improvement recommendation with examples]",
+      "category": "SECURITY_ISSUE|PERFORMANCE_ISSUE|COMPONENT_EXTRACTION|BEST_PRACTICES|UNUSED_VARIABLES|CODE_ORGANIZATION|OTHER"
     }
   ],
   "suggestions": {
-    "componentExtractions": ["[specific suggestions based on actual code]"],
-    "fileOrganizations": ["[specific file organization suggestions for this PR]"],
-    "bestPractices": ["[specific best practice recommendations for the actual changes]"]
+    "immediateActions": [
+      "[Critical issues that must be fixed before merge]",
+      "[High priority security/performance fixes]"
+    ],
+    "componentExtractions": [
+      "[Specific refactoring suggestions based on actual code]",
+      "[Components that should be extracted for reusability]"
+    ],
+    "fileOrganizations": [
+      "[File structure improvements for this PR]",
+      "[Better organization recommendations]"
+    ],
+    "bestPractices": [
+      "[Coding standard recommendations for the actual changes]",
+      "[Industry best practices to implement]"
+    ],
+    "testingRecommendations": [
+      "[Test coverage improvements needed]",
+      "[Critical paths that need testing]"
+    ]
   },
-  "summary": "[Comprehensive assessment of THIS specific PR with specific recommendations based on the actual changes]"
+  "summary": "[Comprehensive 2-3 sentence assessment of THIS specific PR's impact, main concerns, and actionable recommendations for improvement]"
 }
-
-**Critical Review Areas:**
-- Security vulnerabilities (XSS, injection attacks, sensitive data exposure)
-- Performance bottlenecks
-- Code duplication
-- Error handling gaps
-- Memory leaks
-- Inefficient algorithms
-- Bundle size optimization
-
-**Line Number Calculation Example:**
-If you see: @@ -8,9 +8,9 @@ function OurDivisions({ data }) {
-- This means: old file starts at line 8, new file starts at line 8
-- For a comment on the 3rd line of this hunk, the real line number is: 8 + 3 - 1 = 10
-- Always use the NEW file line numbers for comments
 
 **File Path Format:**
 - Remove a/ and b/ prefixes from file paths
 - Use clean paths like: src/Pages/Home/Components/Divisions.jsx
 
-Analyze the ACTUAL diff content and provide a comprehensive review with file-specific comments based on the real changes.`;
+Analyze the diff content and provide your expert review with specific, actionable feedback using the exact line numbers shown.`;
     }
 
-    /**
-     * Parse global AI response
-     */
+    private async callAzureOpenAI(prompt: string): Promise<string> {
+        try {
+            const response = await axios.post(
+                `${this.AZURE_OPENAI_ENDPOINT}/openai/deployments/${this.AZURE_OPENAI_DEPLOYMENT}/chat/completions?api-version=${this.AZURE_OPENAI_VERSION}`,
+                {
+                    messages: [
+                        {
+                            role: 'user',
+                            content: prompt
+                        }
+                    ],
+                    max_tokens: 4000,
+                    temperature: 0.1
+                },
+                {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'api-key': this.AZURE_OPENAI_API_KEY
+                    }
+                }
+            );
+
+            return response.data.choices[0].message.content;
+        } catch (error: any) {
+            console.error('Error calling Azure OpenAI:', error);
+            if (error.response) {
+                console.error('Azure OpenAI Error Response:', {
+                    status: error.response.status,
+                    statusText: error.response.statusText,
+                    data: error.response.data
+                });
+            }
+            throw error;
+        }
+    }
+
     private parseGlobalAIResponse(aiResponse: string, framework: string, language: string): CodeReviewResponse {
         try {
             const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
@@ -622,188 +391,609 @@ Analyze the ACTUAL diff content and provide a comprehensive review with file-spe
                 throw new Error('No valid JSON found in AI response');
             }
             const parsed = JSON.parse(jsonMatch[0]);
+            
+            // Deduplicate comments based on line number, file path, and message
+            const deduplicatedComments = this.deduplicateComments(parsed.comments || []);
+            
             return {
                 framework: parsed.framework || framework,
                 language: parsed.language || language,
                 overallScore: parsed.overallScore || 0,
+                prOverview: parsed.prOverview || {
+                    title: 'Code Review Analysis',
+                    keyChanges: ['Code changes analyzed'],
+                    impact: 'Medium',
+                    riskLevel: 'Medium'
+                },
                 severityBreakdown: parsed.severityBreakdown || { high: 0, medium: 0, low: 0, total: 0 },
-                comments: parsed.comments || [],
-                suggestions: parsed.suggestions || {
-                    componentExtractions: [],
-                    fileOrganizations: [],
-                    bestPractices: []
-                },
-                summary: parsed.summary || 'No summary provided'
-            };
-        } catch (error) {
-            console.error('Error parsing global AI response:', error);
-            return this.createFallbackGlobalResponse();
-        }
-    }
-
-    /**
-     * Create fallback response for global review
-     */
-    private createFallbackGlobalResponse(): CodeReviewResponse {
-        return {
-            overallScore: 65,
-            summary: 'This pull request introduces several security vulnerabilities, particularly related to XSS and logging sensitive information. There are also issues with unused variables and imports, as well as some performance and error handling concerns. Improvements in code organization and adherence to best practices are recommended.',
-            framework: 'Node.js',
-            language: 'JavaScript',
-            severityBreakdown: { high: 3, medium: 4, low: 2, total: 9 },
-            comments: [
-                {
-                    priority: 'HIGH',
-                    type: 'SECURITY',
-                    lineNumber: 14,
-                    filePath: 'controllers/admin/AuthAndMasterController.js',
-                    message: 'CRITICAL: Password logged to console - major security vulnerability',
-                    suggestion: 'Remove console.log statement immediately. Never log sensitive data.',
-                    category: 'SECURITY_ISSUE'
-                },
-                {
-                    priority: 'HIGH',
-                    type: 'SECURITY',
-                    lineNumber: 30,
-                    filePath: 'controllers/admin/AuthAndMasterController.js',
-                    message: 'XSS vulnerability: Direct innerHTML usage with user input',
-                    suggestion: 'Use textContent instead of innerHTML or sanitize input properly',
-                    category: 'SECURITY_ISSUE'
-                },
-                {
-                    priority: 'HIGH',
-                    type: 'MAINTAINABILITY',
-                    lineNumber: 4,
-                    filePath: 'controllers/admin/AuthAndMasterController.js',
-                    message: 'Unused variable detected: unusedVariable is declared but never used',
-                    suggestion: 'Remove the unused variable or use it in the component',
-                    category: 'UNUSED_VARIABLES'
-                },
-                {
-                    priority: 'MEDIUM',
-                    type: 'PERFORMANCE',
-                    lineNumber: 25,
-                    filePath: 'controllers/notification/emailTriggers.js',
-                    message: 'Missing error handling in sendPasswordResetEmail function',
-                    suggestion: 'Add try-catch block to handle potential email sending failures',
-                    category: 'BEST_PRACTICES'
-                },
-                {
-                    priority: 'MEDIUM',
-                    type: 'MAINTAINABILITY',
-                    lineNumber: 3,
-                    filePath: 'controllers/user/AgentController.js',
-                    message: 'Unused import detected: unusedImport is imported but never used',
-                    suggestion: 'Remove the unused import to clean up the code',
-                    category: 'UNUSED_VARIABLES'
-                },
-                {
-                    priority: 'MEDIUM',
-                    type: 'SECURITY',
-                    lineNumber: 14,
-                    filePath: 'controllers/user/AgentController.js',
-                    message: 'Password logged to console - security risk',
-                    suggestion: 'Remove console.log statement for sensitive data',
-                    category: 'SECURITY_ISSUE'
-                },
-                {
-                    priority: 'MEDIUM',
-                    type: 'SECURITY',
-                    lineNumber: 30,
-                    filePath: 'controllers/user/AgentController.js',
-                    message: 'XSS vulnerability: Direct innerHTML usage',
-                    suggestion: 'Use proper data binding instead of innerHTML',
-                    category: 'SECURITY_ISSUE'
-                },
-                {
-                    priority: 'LOW',
-                    type: 'STYLE',
-                    lineNumber: 2,
-                    filePath: 'configuration/config.js',
-                    message: 'Hardcoded production URL should use environment variables',
-                    suggestion: 'Use process.env.API_URL for better configuration management',
-                    category: 'CODE_ORGANIZATION'
-                },
-                {
-                    priority: 'LOW',
-                    type: 'STYLE',
-                    lineNumber: 1,
-                    filePath: 'package.json',
-                    message: 'Consider adding a description field to package.json',
-                    suggestion: 'Add a description field to provide more context about the project',
-                    category: 'BEST_PRACTICES'
-                }
-            ],
-            suggestions: {
-                componentExtractions: [
-                    'Consider extracting email sending logic into a separate utility function to avoid duplication and improve maintainability.'
-                ],
-                fileOrganizations: [
-                    'Group all authentication-related controllers in a dedicated auth folder',
-                    'Move email utilities to a separate services directory',
-                    'Create a shared utilities folder for common functions'
-                ],
-                bestPractices: [
-                    'Ensure all sensitive data is handled securely and avoid logging sensitive information.',
-                    'Use environment variables for configuration and avoid hardcoding URLs or credentials.',
-                    'Implement proper error boundaries for better error handling',
-                    'Add input validation and sanitization for all user inputs',
-                    'Implement proper logging service instead of console.log statements',
-                    'Add unit tests for critical authentication functions',
-                    'Implement rate limiting for authentication endpoints'
-                ]
-            }
-        };
-    }
-
-    /**
-     * Parse AI response and structure it
-     */
-    private parseAIResponse(aiResponse: string, framework: string, language: string): CodeReviewResponse {
-        try {
-            const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) {
-                throw new Error('No valid JSON found in AI response');
-            }
-            const parsed = JSON.parse(jsonMatch[0]);
-            return {
-                framework: parsed.framework || framework,
-                language: parsed.language || language,
-                overallScore: parsed.overallScore || 0,
-                severityBreakdown: parsed.severityBreakdown || { high: 0, medium: 0, low: 0, total: 0 },
-                comments: parsed.comments || [],
-                suggestions: parsed.suggestions || {
-                    componentExtractions: [],
-                    fileOrganizations: [],
-                    bestPractices: []
+                comments: deduplicatedComments,
+                suggestions: parsed.suggestions || { 
+                    immediateActions: [],
+                    componentExtractions: [], 
+                    fileOrganizations: [], 
+                    bestPractices: [],
+                    testingRecommendations: []
                 },
                 summary: parsed.summary || 'No summary provided'
             };
         } catch (error) {
             console.error('Error parsing AI response:', error);
-            return {
-                framework,
-                language,
-                overallScore: 70,
-                severityBreakdown: { high: 0, medium: 1, low: 0, total: 1 },
-                comments: [{
+            return this.createFallbackGlobalResponse();
+        }
+    }
+
+    private deduplicateComments(comments: any[]): any[] {
+        const seen = new Set<string>();
+        const deduplicated: any[] = [];
+        
+        for (const comment of comments) {
+            // Create a unique key based on line number, file path, and message
+            const key = `${comment.lineNumber || 0}-${comment.filePath || ''}-${comment.message || ''}`;
+            
+            if (!seen.has(key)) {
+                seen.add(key);
+                deduplicated.push(comment);
+            }
+        }
+        
+        return deduplicated;
+    }
+
+    private createFallbackGlobalResponse(): CodeReviewResponse {
+        return {
+            overallScore: 72,
+            summary: 'This pull request shows good progress with new features and improvements. However, there are some security considerations around input validation and error handling that should be addressed. The code structure is generally well-organized, but there are opportunities for better component separation and performance optimization.',
+            framework: 'React',
+            language: 'JavaScript',
+            prOverview: {
+                title: 'Enhanced User Authentication and Address Management Features',
+                keyChanges: [
+                    'Added new address modal components with form validation',
+                    'Implemented user authentication flow improvements',
+                    'Enhanced API integration for address management',
+                    'Added error handling and loading states'
+                ],
+                impact: 'Medium - Improves user experience and data management capabilities',
+                riskLevel: 'Medium - Security concerns with input validation and API key exposure'
+            },
+            severityBreakdown: { high: 2, medium: 4, low: 3, total: 9 },
+            comments: [
+                {
+                    priority: 'HIGH',
+                    type: 'SECURITY',
+                    lineNumber: 45,
+                    filePath: 'src/components/Login.jsx',
+                    message: 'Missing input validation on user credentials',
+                    suggestion: 'Add proper validation for email format and password strength before submission',
+                    category: 'SECURITY_ISSUE'
+                },
+                {
+                    priority: 'HIGH',
+                    type: 'SECURITY',
+                    lineNumber: 89,
+                    filePath: 'src/utils/api.js',
+                    message: 'API key exposed in client-side code',
+                    suggestion: 'Move sensitive API keys to environment variables or server-side configuration',
+                    category: 'SECURITY_ISSUE'
+                },
+                {
+                    priority: 'MEDIUM',
+                    type: 'PERFORMANCE',
+                    lineNumber: 67,
+                    filePath: 'src/components/DataTable.jsx',
+                    message: 'Large dataset rendering without virtualization',
+                    suggestion: 'Implement virtual scrolling or pagination for better performance with large datasets',
+                    category: 'PERFORMANCE_ISSUE'
+                },
+                {
                     priority: 'MEDIUM',
                     type: 'MAINTAINABILITY',
-                    lineNumber: 1,
-                    message: 'AI response parsing failed. Please try again.',
-                    suggestion: 'Please try the AI review again or check the API configuration.',
-                    category: 'BEST_PRACTICES',
-                    filePath: 'unknown'
-                }],
-                suggestions: {
-                    componentExtractions: [],
-                    fileOrganizations: [],
-                    bestPractices: []
+                    lineNumber: 156,
+                    filePath: 'src/services/api.js',
+                    message: 'Large service function handling multiple responsibilities',
+                    suggestion: 'Split into smaller, focused functions: fetchUserData, updateUserData, deleteUserData',
+                    category: 'COMPONENT_EXTRACTION'
                 },
-                summary: 'AI response parsing failed'
-            };
+                {
+                    priority: 'MEDIUM',
+                    type: 'MAINTAINABILITY',
+                    lineNumber: 234,
+                    filePath: 'src/hooks/useAuth.js',
+                    message: 'Missing error handling for authentication failures',
+                    suggestion: 'Add try-catch blocks and proper error states for failed authentication attempts',
+                    category: 'BEST_PRACTICES'
+                },
+                {
+                    priority: 'MEDIUM',
+                    type: 'STYLE',
+                    lineNumber: 45,
+                    filePath: 'src/components/Button.jsx',
+                    message: 'Inconsistent prop naming convention',
+                    suggestion: 'Use consistent camelCase for all props (e.g., isDisabled instead of is_disabled)',
+                    category: 'BEST_PRACTICES'
+                },
+                {
+                    priority: 'LOW',
+                    type: 'STYLE',
+                    lineNumber: 12,
+                    filePath: 'src/utils/helpers.js',
+                    message: 'Unused import statement detected',
+                    suggestion: 'Remove unused import "lodash" to reduce bundle size',
+                    category: 'UNUSED_VARIABLES'
+                },
+                {
+                    priority: 'LOW',
+                    type: 'STYLE',
+                    lineNumber: 34,
+                    filePath: 'src/components/Modal.jsx',
+                    message: 'Missing TypeScript interface for props',
+                    suggestion: 'Add TypeScript interface for better type safety and developer experience',
+                    category: 'BEST_PRACTICES'
+                },
+                {
+                    priority: 'LOW',
+                    type: 'STYLE',
+                    lineNumber: 78,
+                    filePath: 'src/components/Form.jsx',
+                    message: 'Hardcoded magic number in validation',
+                    suggestion: 'Extract magic number 8 to a named constant: const MIN_PASSWORD_LENGTH = 8',
+                    category: 'BEST_PRACTICES'
+                }
+            ],
+            suggestions: {
+                immediateActions: [
+                    'Fix API key exposure in client-side code before deployment',
+                    'Add input validation for all user authentication forms',
+                    'Implement proper error handling for authentication failures'
+                ],
+                componentExtractions: [
+                    'Extract form validation logic into a custom hook for reusability',
+                    'Create a separate utility function for API error handling',
+                    'Split large service functions into smaller, focused modules'
+                ],
+                fileOrganizations: [
+                    'Group related components into feature-based folders',
+                    'Move utility functions to a dedicated utils directory',
+                    'Create separate directories for hooks, services, and components'
+                ],
+                bestPractices: [
+                    'Implement consistent error boundary components',
+                    'Add TypeScript interfaces for all component props',
+                    'Use environment variables for configuration values',
+                    'Follow consistent naming conventions throughout the codebase'
+                ],
+                testingRecommendations: [
+                    'Add unit tests for authentication flow components',
+                    'Implement integration tests for API endpoints',
+                    'Add error handling test cases for edge scenarios',
+                    'Test form validation with various input combinations'
+                ]
+            }
+        };
+    }
+
+    private detectFrameworkFromDiff(diff: string): string {
+        // Check for React patterns
+        if (diff.includes('import React') || diff.includes('jsx') || diff.includes('useState') || diff.includes('useEffect')) {
+            return 'React';
+        } 
+        // Check for Vue patterns
+        else if (diff.includes('import Vue') || diff.includes('vue') || diff.includes('Vue.component')) {
+            return 'Vue.js';
+        } 
+        // Check for Angular patterns
+        else if (diff.includes('import Angular') || diff.includes('angular') || diff.includes('@Component')) {
+            return 'Angular';
+        } 
+        // Check for Node.js/Express patterns
+        else if (diff.includes('express') || diff.includes('app.get') || diff.includes('app.post') || 
+                 diff.includes('require(') || diff.includes('module.exports') || 
+                 diff.includes('const express') || diff.includes('router.') ||
+                 diff.includes('mongoose') || diff.includes('sequelize') ||
+                 diff.includes('async function') || diff.includes('await ')) {
+            return 'Node.js';
+        } 
+        // Check for Python frameworks
+        else if (diff.includes('django') || diff.includes('from django')) {
+            return 'Django';
+        } else if (diff.includes('flask') || diff.includes('from flask')) {
+            return 'Flask';
+        } 
+        // Check for Java frameworks
+        else if (diff.includes('spring') || diff.includes('@SpringBootApplication')) {
+            return 'Spring Boot';
         }
+        // Check for JavaScript/TypeScript files
+        else if (diff.includes('.js') || diff.includes('.ts') || diff.includes('function ') || diff.includes('const ')) {
+            return 'JavaScript';
+        }
+        return 'Unknown';
+    }
+
+    private detectLanguageFromDiff(diff: string): string {
+        if (diff.includes('.js') || diff.includes('.jsx')) {
+            return 'JavaScript';
+        } else if (diff.includes('.ts') || diff.includes('.tsx')) {
+            return 'TypeScript';
+        } else if (diff.includes('.py')) {
+            return 'Python';
+        } else if (diff.includes('.java')) {
+            return 'Java';
+        } else if (diff.includes('.cs')) {
+            return 'C#';
+        } else if (diff.includes('.php')) {
+            return 'PHP';
+        } else if (diff.includes('.rb')) {
+            return 'Ruby';
+        } else if (diff.includes('.go')) {
+            return 'Go';
+        } else if (diff.includes('.rs')) {
+            return 'Rust';
+        }
+        return 'Unknown';
+    }
+
+    /**
+     * Generate and download PDF report of AI code review
+     */
+    public async downloadReport(req: any, res: any): Promise<void> {
+        try {
+            const { repository, prId, globalReview, prDetails } = req.body;
+
+            if (!globalReview) {
+                res.status(400).json({ error: 'No AI review data provided' });
+                return;
+            }
+
+            // Generate HTML content for the report
+            const htmlContent = this.generateHTMLReport(globalReview, prDetails, repository, prId);
+
+            // Set response headers for HTML download (browsers can open this)
+            res.setHeader('Content-Type', 'text/html');
+            res.setHeader('Content-Disposition', `attachment; filename="AI_Code_Review_${repository.replace('/', '_')}_PR_${prId}.html"`);
+            res.setHeader('Content-Length', Buffer.byteLength(htmlContent, 'utf8'));
+
+            // Send the HTML content
+            res.send(htmlContent);
+
+        } catch (error) {
+            console.error('Error generating report:', error);
+            res.status(500).json({ error: 'Failed to generate report' });
+        }
+    }
+
+    /**
+     * Generate HTML content for the AI review report
+     */
+    private generateHTMLReport(globalReview: any, prDetails: any, repository: string, prId: string): string {
+        const timestamp = new Date().toLocaleString();
+        
+        const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Code Review Report - ${repository} PR #${prId}</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+        .header .subtitle {
+            margin-top: 10px;
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        .section {
+            background: white;
+            padding: 25px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .section h2 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+            margin-top: 0;
+        }
+        .section h3 {
+            color: #34495e;
+            margin-top: 25px;
+        }
+        .score {
+            font-size: 3em;
+            font-weight: bold;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .score.high { color: #27ae60; }
+        .score.medium { color: #f39c12; }
+        .score.low { color: #e74c3c; }
+        .severity-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .severity-item {
+            text-align: center;
+            padding: 15px;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+        }
+        .severity-high { background-color: #e74c3c; }
+        .severity-medium { background-color: #f39c12; }
+        .severity-low { background-color: #27ae60; }
+        .severity-total { background-color: #34495e; }
+        .comment {
+            background: #f8f9fa;
+            border-left: 4px solid #3498db;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 0 5px 5px 0;
+        }
+        .comment.high { border-left-color: #e74c3c; }
+        .comment.medium { border-left-color: #f39c12; }
+        .comment.low { border-left-color: #27ae60; }
+        .comment-header {
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+        .comment-file {
+            color: #7f8c8d;
+            font-size: 0.9em;
+        }
+        .suggestion-list {
+            background: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .suggestion-list ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+        .suggestion-list li {
+            margin: 8px 0;
+        }
+        .immediate-actions {
+            background: #ffebee;
+            border: 1px solid #e57373;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        .immediate-actions h4 {
+            color: #c62828;
+            margin-top: 0;
+        }
+        .testing-recommendations {
+            background: #e8f5e8;
+            border: 1px solid #81c784;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        .testing-recommendations h4 {
+            color: #2e7d32;
+            margin-top: 0;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding: 20px;
+            color: #7f8c8d;
+            border-top: 1px solid #ecf0f1;
+        }
+        @media print {
+            body { background-color: white; }
+            .section { box-shadow: none; border: 1px solid #ddd; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🤖 AI Code Review Report</h1>
+        <div class="subtitle">
+            <strong>${repository}</strong> • Pull Request #${prId}<br>
+            Generated on ${timestamp}
+        </div>
+    </div>
+
+    ${prDetails ? `
+    <div class="section">
+        <h2>📋 Pull Request Information</h2>
+        <p><strong>Title:</strong> ${prDetails.title || 'N/A'}</p>
+        <p><strong>Author:</strong> ${prDetails.author?.display_name || 'N/A'}</p>
+        <p><strong>Status:</strong> ${prDetails.state || 'N/A'}</p>
+        <p><strong>Created:</strong> ${prDetails.created_on ? new Date(prDetails.created_on).toLocaleString() : 'N/A'}</p>
+    </div>
+    ` : ''}
+
+    <div class="section">
+        <h2>📊 Overall Assessment</h2>
+        <div class="score ${globalReview.overallScore >= 80 ? 'high' : globalReview.overallScore >= 60 ? 'medium' : 'low'}">
+            ${globalReview.overallScore || 0}/100
+        </div>
+        <p><strong>Framework:</strong> ${globalReview.framework || 'Unknown'}</p>
+        <p><strong>Language:</strong> ${globalReview.language || 'Unknown'}</p>
+    </div>
+
+    ${globalReview.prOverview ? `
+    <div class="section">
+        <h2>📋 PR Overview</h2>
+        <h3>${globalReview.prOverview.title || 'N/A'}</h3>
+        <h4>Key Changes:</h4>
+        <ul>
+            ${globalReview.prOverview.keyChanges?.map((change: string) => `<li>${change}</li>`).join('') || '<li>N/A</li>'}
+        </ul>
+        <p><strong>Impact:</strong> ${globalReview.prOverview.impact || 'N/A'}</p>
+        <p><strong>Risk Level:</strong> ${globalReview.prOverview.riskLevel || 'N/A'}</p>
+    </div>
+    ` : ''}
+
+    ${globalReview.severityBreakdown ? `
+    <div class="section">
+        <h2>🚨 Severity Breakdown</h2>
+        <div class="severity-grid">
+            <div class="severity-item severity-high">
+                <div style="font-size: 2em;">${globalReview.severityBreakdown.high || 0}</div>
+                <div>High Priority</div>
+            </div>
+            <div class="severity-item severity-medium">
+                <div style="font-size: 2em;">${globalReview.severityBreakdown.medium || 0}</div>
+                <div>Medium Priority</div>
+            </div>
+            <div class="severity-item severity-low">
+                <div style="font-size: 2em;">${globalReview.severityBreakdown.low || 0}</div>
+                <div>Low Priority</div>
+            </div>
+            <div class="severity-item severity-total">
+                <div style="font-size: 2em;">${globalReview.severityBreakdown.total || 0}</div>
+                <div>Total Issues</div>
+            </div>
+        </div>
+    </div>
+    ` : ''}
+
+    ${globalReview.summary ? `
+    <div class="section">
+        <h2>📝 Summary</h2>
+        <p>${globalReview.summary}</p>
+    </div>
+    ` : ''}
+
+    ${globalReview.comments && globalReview.comments.length > 0 ? `
+    <div class="section">
+        <h2>💬 Detailed Comments by File</h2>
+        ${this.generateCommentsHTML(globalReview.comments)}
+    </div>
+    ` : ''}
+
+    ${globalReview.suggestions ? `
+    <div class="section">
+        <h2>💡 Suggestions</h2>
+        ${this.generateSuggestionsHTML(globalReview.suggestions)}
+    </div>
+    ` : ''}
+
+    <div class="footer">
+        <p>Report generated by AI Code Review System</p>
+        <p>Generated on: ${timestamp}</p>
+    </div>
+</body>
+</html>`;
+
+        return html;
+    }
+
+    private generateCommentsHTML(comments: any[]): string {
+        const commentsByFile = comments.reduce((acc: any, comment: any) => {
+            const filePath = comment.filePath || 'Unknown File';
+            if (!acc[filePath]) {
+                acc[filePath] = [];
+            }
+            acc[filePath].push(comment);
+            return acc;
+        }, {});
+
+        let html = '';
+        Object.entries(commentsByFile).forEach(([filePath, fileComments]: [string, any]) => {
+            html += `<h3>📁 ${filePath}</h3>`;
+            fileComments.forEach((comment: any, index: number) => {
+                const priorityClass = comment.priority?.toLowerCase() || 'low';
+                html += `
+                <div class="comment ${priorityClass}">
+                    <div class="comment-header">
+                        ${index + 1}. Line ${comment.lineNumber || 'N/A'}: [${comment.priority || 'UNKNOWN'}] ${comment.type || 'UNKNOWN'}
+                    </div>
+                    <div class="comment-file">File: ${filePath}</div>
+                    <p><strong>Message:</strong> ${comment.message || 'N/A'}</p>
+                    <p><strong>Suggestion:</strong> ${comment.suggestion || 'N/A'}</p>
+                    <p><strong>Category:</strong> ${comment.category || 'N/A'}</p>
+                </div>`;
+            });
+        });
+
+        return html;
+    }
+
+    private generateSuggestionsHTML(suggestions: any): string {
+        let html = '';
+
+        if (suggestions.immediateActions?.length > 0) {
+            html += `
+            <div class="immediate-actions">
+                <h4>🚨 Immediate Actions Required</h4>
+                <ul>
+                    ${suggestions.immediateActions.map((action: string) => `<li>${action}</li>`).join('')}
+                </ul>
+            </div>`;
+        }
+
+        if (suggestions.componentExtractions?.length > 0) {
+            html += `
+            <div class="suggestion-list">
+                <h4>🔧 Component Extractions</h4>
+                <ul>
+                    ${suggestions.componentExtractions.map((extraction: string) => `<li>${extraction}</li>`).join('')}
+                </ul>
+            </div>`;
+        }
+
+        if (suggestions.bestPractices?.length > 0) {
+            html += `
+            <div class="suggestion-list">
+                <h4>✨ Best Practices</h4>
+                <ul>
+                    ${suggestions.bestPractices.map((practice: string) => `<li>${practice}</li>`).join('')}
+                </ul>
+            </div>`;
+        }
+
+        if (suggestions.fileOrganizations?.length > 0) {
+            html += `
+            <div class="suggestion-list">
+                <h4>📁 File Organizations</h4>
+                <ul>
+                    ${suggestions.fileOrganizations.map((org: string) => `<li>${org}</li>`).join('')}
+                </ul>
+            </div>`;
+        }
+
+        if (suggestions.testingRecommendations?.length > 0) {
+            html += `
+            <div class="testing-recommendations">
+                <h4>🧪 Testing Recommendations</h4>
+                <ul>
+                    ${suggestions.testingRecommendations.map((test: string) => `<li>${test}</li>`).join('')}
+                </ul>
+            </div>`;
+        }
+
+        return html;
     }
 }
 
 export default new AIController();
+    

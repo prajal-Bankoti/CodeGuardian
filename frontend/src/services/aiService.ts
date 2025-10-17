@@ -13,9 +13,11 @@ export interface CodeReviewComment {
 }
 
 export interface CodeReviewSuggestions {
+    immediateActions: string[];
     componentExtractions: string[];
     fileOrganizations: string[];
     bestPractices: string[];
+    testingRecommendations: string[];
 }
 
 export interface SeverityBreakdown {
@@ -29,6 +31,12 @@ export interface CodeReviewResponse {
     framework: string;
     language: string;
     overallScore: number;
+    prOverview: {
+        title: string;
+        keyChanges: string[];
+        impact: string;
+        riskLevel: string;
+    };
     severityBreakdown: SeverityBreakdown;
     comments: CodeReviewComment[];
     suggestions: CodeReviewSuggestions;
@@ -64,7 +72,10 @@ class AIService {
                 }
             );
 
-            if (response.data.success) {
+            // Backend returns data directly, not wrapped in success/data structure
+            if (response.data && response.data.overallScore !== undefined) {
+                return response.data;
+            } else if (response.data.success) {
                 return response.data.data;
             } else {
                 throw new Error(response.data.message || 'Failed to review PR');
@@ -88,7 +99,10 @@ class AIService {
                 }
             );
 
-            if (response.data.success) {
+            // Backend returns data directly, not wrapped in success/data structure
+            if (response.data && response.data.overallScore !== undefined) {
+                return response.data;
+            } else if (response.data.success) {
                 return response.data.data;
             } else {
                 throw new Error(response.data.message || 'AI review failed');

@@ -12,6 +12,7 @@ const PRDetailView: React.FC = () => {
     const [prDetails, setPrDetails] = useState<BitbucketPullRequest | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [globalReview, setGlobalReview] = useState<any>(null);
 
     useEffect(() => {
         const fetchPRDetails = async () => {
@@ -56,6 +57,47 @@ const PRDetailView: React.FC = () => {
                 return 'bg-red-100 text-red-800';
             default:
                 return 'bg-gray-100 text-gray-800';
+        }
+    };
+
+    const handleDownloadReport = async () => {
+        if (!globalReview || !repository || !prId) {
+            alert('No AI review data available to download');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/ai/download-report', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('bitbucket_access_token')}`
+                },
+                body: JSON.stringify({
+                    repository,
+                    prId,
+                    globalReview,
+                    prDetails
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to generate report');
+            }
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = `AI_Code_Review_${repository.replace('/', '_')}_PR_${prId}.html`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        } catch (error) {
+            console.error('Error downloading report:', error);
+            alert('Failed to download report. Please try again.');
         }
     };
 
@@ -196,6 +238,7 @@ const PRDetailView: React.FC = () => {
                                 repository={repository || ''}
                                 prId={prId || ''}
                                 accessToken=""
+                                onReviewComplete={setGlobalReview}
                             />
                         </div>
 
@@ -267,30 +310,16 @@ const PRDetailView: React.FC = () => {
                         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
                             <h3 className="text-lg font-semibold text-gray-900 mb-4">Actions</h3>
                             <div className="space-y-3">
-                                <a
-                                    href={prDetails.links.diff.href}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="block w-full text-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                                <button
+                                    onClick={handleDownloadReport}
+                                    disabled={!globalReview}
+                                    className="w-full text-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                 >
-                                    View Diff
-                                </a>
-                                <a
-                                    href={prDetails.links.commits.href}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="block w-full text-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
-                                >
-                                    View Commits
-                                </a>
-                                <a
-                                    href={prDetails.links.comments.href}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="block w-full text-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                                >
-                                    View Comments
-                                </a>
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                    Download AI Report (HTML)
+                                </button>
                             </div>
                         </div>
 
