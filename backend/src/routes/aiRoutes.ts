@@ -25,6 +25,13 @@ router.post('/review-pr', (req, res) => aiController.reviewPullRequest(req, res)
 router.post('/download-report', (req, res) => aiController.downloadReport(req, res));
 
 /**
+ * @route POST /api/ai/post-comments
+ * @desc Post AI review comments to Bitbucket PR
+ * @access Private (requires authentication)
+ */
+router.post('/post-comments', (req, res) => aiController.postCommentsToBitbucket(req, res));
+
+/**
  * @route GET /api/ai/health
  * @desc Check AI service health
  * @access Public

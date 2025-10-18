@@ -64,9 +64,20 @@ class AIController {
             const reviewResult = await this.performGlobalReview(repository, prId, accessToken);
             
             res.json(reviewResult);
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error in global review:', error);
-            res.status(500).json({ error: 'Failed to perform global review' });
+            
+            // Check for specific error types
+            if (error.response?.status === 400 && error.response?.data?.error?.message?.includes('maximum context length')) {
+                res.status(413).json({ 
+                    error: 'Content limit exceeded',
+                    message: 'This is a large PR. The AI token limit exceeded for large PR. Please update the API connect with team.',
+                    code: 'CONTENT_LIMIT_EXCEEDED'
+                });
+                return;
+            }
+            
+            res.status(500).json({ error: 'Failed to perform global review', message: error.message });
         }
     }
 
@@ -84,7 +95,7 @@ class AIController {
             return this.parseGlobalAIResponse(aiResponse, framework, language);
         } catch (error) {
             console.error('Error performing global review:', error);
-            return this.createFallbackGlobalResponse();
+            throw error;
         }
     }
 
@@ -418,7 +429,7 @@ Analyze the diff content and provide your expert review with specific, actionabl
             };
         } catch (error) {
             console.error('Error parsing AI response:', error);
-            return this.createFallbackGlobalResponse();
+            throw new Error('Failed to parse AI response: ' + error);
         }
     }
 
@@ -439,138 +450,6 @@ Analyze the diff content and provide your expert review with specific, actionabl
         return deduplicated;
     }
 
-    private createFallbackGlobalResponse(): CodeReviewResponse {
-        return {
-            overallScore: 72,
-            summary: 'This pull request shows good progress with new features and improvements. However, there are some security considerations around input validation and error handling that should be addressed. The code structure is generally well-organized, but there are opportunities for better component separation and performance optimization.',
-            framework: 'React',
-            language: 'JavaScript',
-            prOverview: {
-                title: 'Enhanced User Authentication and Address Management Features',
-                keyChanges: [
-                    'Added new address modal components with form validation',
-                    'Implemented user authentication flow improvements',
-                    'Enhanced API integration for address management',
-                    'Added error handling and loading states'
-                ],
-                impact: 'Medium - Improves user experience and data management capabilities',
-                riskLevel: 'Medium - Security concerns with input validation and API key exposure'
-            },
-            severityBreakdown: { high: 2, medium: 4, low: 3, total: 9 },
-            comments: [
-                {
-                    priority: 'HIGH',
-                    type: 'SECURITY',
-                    lineNumber: 45,
-                    filePath: 'src/components/Login.jsx',
-                    message: 'Missing input validation on user credentials',
-                    suggestion: 'Add proper validation for email format and password strength before submission',
-                    category: 'SECURITY_ISSUE'
-                },
-                {
-                    priority: 'HIGH',
-                    type: 'SECURITY',
-                    lineNumber: 89,
-                    filePath: 'src/utils/api.js',
-                    message: 'API key exposed in client-side code',
-                    suggestion: 'Move sensitive API keys to environment variables or server-side configuration',
-                    category: 'SECURITY_ISSUE'
-                },
-                {
-                    priority: 'MEDIUM',
-                    type: 'PERFORMANCE',
-                    lineNumber: 67,
-                    filePath: 'src/components/DataTable.jsx',
-                    message: 'Large dataset rendering without virtualization',
-                    suggestion: 'Implement virtual scrolling or pagination for better performance with large datasets',
-                    category: 'PERFORMANCE_ISSUE'
-                },
-                {
-                    priority: 'MEDIUM',
-                    type: 'MAINTAINABILITY',
-                    lineNumber: 156,
-                    filePath: 'src/services/api.js',
-                    message: 'Large service function handling multiple responsibilities',
-                    suggestion: 'Split into smaller, focused functions: fetchUserData, updateUserData, deleteUserData',
-                    category: 'COMPONENT_EXTRACTION'
-                },
-                {
-                    priority: 'MEDIUM',
-                    type: 'MAINTAINABILITY',
-                    lineNumber: 234,
-                    filePath: 'src/hooks/useAuth.js',
-                    message: 'Missing error handling for authentication failures',
-                    suggestion: 'Add try-catch blocks and proper error states for failed authentication attempts',
-                    category: 'BEST_PRACTICES'
-                },
-                {
-                    priority: 'MEDIUM',
-                    type: 'STYLE',
-                    lineNumber: 45,
-                    filePath: 'src/components/Button.jsx',
-                    message: 'Inconsistent prop naming convention',
-                    suggestion: 'Use consistent camelCase for all props (e.g., isDisabled instead of is_disabled)',
-                    category: 'BEST_PRACTICES'
-                },
-                {
-                    priority: 'LOW',
-                    type: 'STYLE',
-                    lineNumber: 12,
-                    filePath: 'src/utils/helpers.js',
-                    message: 'Unused import statement detected',
-                    suggestion: 'Remove unused import "lodash" to reduce bundle size',
-                    category: 'UNUSED_VARIABLES'
-                },
-                {
-                    priority: 'LOW',
-                    type: 'STYLE',
-                    lineNumber: 34,
-                    filePath: 'src/components/Modal.jsx',
-                    message: 'Missing TypeScript interface for props',
-                    suggestion: 'Add TypeScript interface for better type safety and developer experience',
-                    category: 'BEST_PRACTICES'
-                },
-                {
-                    priority: 'LOW',
-                    type: 'STYLE',
-                    lineNumber: 78,
-                    filePath: 'src/components/Form.jsx',
-                    message: 'Hardcoded magic number in validation',
-                    suggestion: 'Extract magic number 8 to a named constant: const MIN_PASSWORD_LENGTH = 8',
-                    category: 'BEST_PRACTICES'
-                }
-            ],
-            suggestions: {
-                immediateActions: [
-                    'Fix API key exposure in client-side code before deployment',
-                    'Add input validation for all user authentication forms',
-                    'Implement proper error handling for authentication failures'
-                ],
-                componentExtractions: [
-                    'Extract form validation logic into a custom hook for reusability',
-                    'Create a separate utility function for API error handling',
-                    'Split large service functions into smaller, focused modules'
-                ],
-                fileOrganizations: [
-                    'Group related components into feature-based folders',
-                    'Move utility functions to a dedicated utils directory',
-                    'Create separate directories for hooks, services, and components'
-                ],
-                bestPractices: [
-                    'Implement consistent error boundary components',
-                    'Add TypeScript interfaces for all component props',
-                    'Use environment variables for configuration values',
-                    'Follow consistent naming conventions throughout the codebase'
-                ],
-                testingRecommendations: [
-                    'Add unit tests for authentication flow components',
-                    'Implement integration tests for API endpoints',
-                    'Add error handling test cases for edge scenarios',
-                    'Test form validation with various input combinations'
-                ]
-            }
-        };
-    }
 
     private detectFrameworkFromDiff(diff: string): string {
         // Check for React patterns
@@ -631,6 +510,112 @@ Analyze the diff content and provide your expert review with specific, actionabl
             return 'Rust';
         }
         return 'Unknown';
+    }
+
+    /**
+     * Post AI review comments to Bitbucket PR
+     */
+    async postCommentsToBitbucket(req: any, res: any): Promise<void> {
+        try {
+            const { repository, prId, comments } = req.body;
+            const accessToken = req.headers.authorization?.replace('Bearer ', '');
+
+            console.log('Post comments request:', {
+                repository,
+                prId,
+                commentsCount: comments?.length,
+                hasAccessToken: !!accessToken,
+                headers: req.headers.authorization ? 'Present' : 'Missing'
+            });
+
+            if (!repository || !prId || !comments || !accessToken) {
+                res.status(400).json({ 
+                    error: 'Missing required parameters',
+                    received: {
+                        repository: !!repository,
+                        prId: !!prId,
+                        comments: !!comments,
+                        accessToken: !!accessToken
+                    }
+                });
+                return;
+            }
+
+            console.log(`Posting ${comments.length} comments to Bitbucket PR: ${repository}/${prId}`);
+            
+            const results = await this.postCommentsToBitbucketAPI(repository, prId, comments, accessToken);
+            
+            res.json({
+                success: true,
+                message: `Successfully posted ${results.successful} out of ${comments.length} comments`,
+                results: results
+            });
+        } catch (error: any) {
+            console.error('Error posting comments to Bitbucket:', error);
+            res.status(500).json({ error: 'Failed to post comments to Bitbucket', message: error.message });
+        }
+    }
+
+    private async postCommentsToBitbucketAPI(repository: string, prId: string, comments: any[], accessToken: string): Promise<{ successful: number, failed: number, errors: any[] }> {
+        const results = { successful: 0, failed: 0, errors: [] };
+        
+        for (const comment of comments) {
+            try {
+                // Format comment for Bitbucket API
+                const bitbucketComment = {
+                    content: {
+                        raw: `**${comment.priority} Priority - ${comment.type}**\n\n**Issue:** ${comment.message}\n\n**Suggestion:** ${comment.suggestion}\n\n*Generated by CodeGuardian AI*`
+                    },
+                    inline: {
+                        path: comment.filePath,
+                        to: comment.lineNumber
+                    }
+                };
+
+                const response = await axios.post(
+                    `https://api.bitbucket.org/2.0/repositories/${repository}/pullrequests/${prId}/comments`,
+                    bitbucketComment,
+                    {
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`,
+                            'Content-Type': 'application/json'
+                        }
+                    }
+                );
+
+                console.log(`Posted comment for ${comment.filePath}:${comment.lineNumber}`);
+                results.successful++;
+                
+                // Add delay to prevent rate limiting
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+            } catch (error: any) {
+                console.error(`Failed to post comment for ${comment.filePath}:${comment.lineNumber}:`, error.response?.data || error.message);
+                results.failed++;
+                
+                // Check for specific token errors
+                const errorMessage = error.response?.data?.error?.message || error.message;
+                if (errorMessage.includes('Token is invalid') || errorMessage.includes('expired') || errorMessage.includes('not supported')) {
+                    results.errors.push({
+                        filePath: comment.filePath,
+                        lineNumber: comment.lineNumber,
+                        error: {
+                            type: 'token_error',
+                            message: 'Bitbucket token is invalid, expired, or lacks permissions for posting comments. Please check your token permissions.',
+                            details: errorMessage
+                        }
+                    });
+                } else {
+                    results.errors.push({
+                        filePath: comment.filePath,
+                        lineNumber: comment.lineNumber,
+                        error: error.response?.data || error.message
+                    });
+                }
+            }
+        }
+        
+        return results;
     }
 
     /**

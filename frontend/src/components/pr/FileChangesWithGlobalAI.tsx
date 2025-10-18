@@ -25,6 +25,8 @@ const FileChangesWithGlobalAI: React.FC<FileChangesWithGlobalAIProps> = ({ repos
     const [globalReview, setGlobalReview] = useState<CodeReviewResponse | null>(null);
     const [reviewLoading, setReviewLoading] = useState(false);
     const [hasReviewed, setHasReviewed] = useState(false);
+    const [postingComments, setPostingComments] = useState(false);
+    const [commentsPosted, setCommentsPosted] = useState(false);
 
     useEffect(() => {
         const fetchFileChanges = async () => {
@@ -112,11 +114,71 @@ const FileChangesWithGlobalAI: React.FC<FileChangesWithGlobalAIProps> = ({ repos
             if (onReviewComplete) {
                 onReviewComplete(result);
             }
-        } catch (err) {
+        } catch (err: any) {
             console.error('Error performing global review:', err);
-            setError('Failed to perform AI review');
+
+            // Check for specific error types
+            if (err.response?.status === 413 && err.response?.data?.code === 'CONTENT_LIMIT_EXCEEDED') {
+                setError('CONTENT_LIMIT_EXCEEDED');
+            } else {
+                setError('Failed to perform AI review');
+            }
         } finally {
             setReviewLoading(false);
+        }
+    };
+
+    const handlePostCommentsToBitbucket = async () => {
+        if (!globalReview || !globalReview.comments) {
+            return;
+        }
+
+        try {
+            setPostingComments(true);
+
+            const requestData = {
+                repository,
+                prId,
+                comments: globalReview.comments
+            };
+
+            console.log('Posting comments to Bitbucket:', requestData);
+
+            const response = await fetch('/api/ai/post-comments', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                },
+                body: JSON.stringify(requestData)
+            });
+
+            const result = await response.json();
+
+            if (response.ok) {
+                setCommentsPosted(true);
+
+                // Check if there were token errors
+                const hasTokenErrors = result.results.errors.some((error: any) =>
+                    error.error?.type === 'token_error' ||
+                    error.error?.message?.includes('Token is invalid')
+                );
+
+                if (hasTokenErrors) {
+                    alert(`❌ Token Error: Your Bitbucket token is invalid, expired, or lacks permissions for posting comments.\n\nPlease:\n1. Check your token permissions in Bitbucket\n2. Ensure the token has "Repositories: Write" permission\n3. Generate a new token if needed\n\nPosted: ${result.results.successful}/${globalReview.comments.length} comments`);
+                } else if (result.results.successful === 0) {
+                    alert(`❌ Failed to post any comments to Bitbucket.\n\nPosted: ${result.results.successful}/${globalReview.comments.length} comments`);
+                } else {
+                    alert(`✅ Successfully posted ${result.results.successful} out of ${globalReview.comments.length} comments to Bitbucket!`);
+                }
+            } else {
+                alert(`Failed to post comments: ${result.error}`);
+            }
+        } catch (error) {
+            console.error('Error posting comments to Bitbucket:', error);
+            alert('Failed to post comments to Bitbucket');
+        } finally {
+            setPostingComments(false);
         }
     };
 
@@ -194,7 +256,7 @@ const FileChangesWithGlobalAI: React.FC<FileChangesWithGlobalAIProps> = ({ repos
         );
     }
 
-    if (error) {
+    if (error && error !== 'CONTENT_LIMIT_EXCEEDED') {
         return (
             <div className="text-center py-8 text-red-600">
                 <p>{error}</p>
@@ -208,14 +270,39 @@ const FileChangesWithGlobalAI: React.FC<FileChangesWithGlobalAIProps> = ({ repos
             <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
                 <div className="flex items-center justify-between mb-4">
                     <h3 className="text-xl font-semibold text-gray-900">AI Code Review</h3>
-                    <button
-                        onClick={handleGlobalReview}
-                        disabled={reviewLoading}
-                        className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        {reviewLoading ? 'Reviewing...' : 'Review Entire PR'}
-                    </button>
+                    {error !== 'CONTENT_LIMIT_EXCEEDED' && (
+                        <button
+                            onClick={handleGlobalReview}
+                            disabled={reviewLoading}
+                            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {reviewLoading ? 'Reviewing...' : 'Review Entire PR'}
+                        </button>
+                    )}
                 </div>
+
+                {error === 'CONTENT_LIMIT_EXCEEDED' && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                        <div className="flex items-start">
+                            <div className="flex-shrink-0">
+                                <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                </svg>
+                            </div>
+                            <div className="ml-3">
+                                <h3 className="text-sm font-medium text-yellow-800">
+                                    Content Limit Exceeded
+                                </h3>
+                                <div className="mt-2 text-sm text-yellow-700">
+                                    <p>
+                                        This is a large PR. The AI token limit exceeded for large PR. Please update the API connect with team.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
 
                 {hasReviewed && globalReview && (
                     <div className="space-y-4">
@@ -265,6 +352,51 @@ const FileChangesWithGlobalAI: React.FC<FileChangesWithGlobalAIProps> = ({ repos
                                         </div>
                                         <div className="text-xs text-gray-600">Total</div>
                                     </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Post Comments to Bitbucket Button */}
+                        {globalReview.comments && globalReview.comments.length > 0 && (
+                            <div className="bg-white border rounded-lg p-4">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <h4 className="font-semibold mb-2">Post Comments to Bitbucket</h4>
+                                        <p className="text-sm text-gray-600 mb-2">
+                                            Post all {globalReview.comments.length} AI review comments directly to the Bitbucket PR
+                                        </p>
+                                        <p className="text-xs text-blue-600 bg-blue-50 p-2 rounded">
+                                            💡 <strong>Note:</strong> Your Bitbucket token needs "Repositories: Write" permission to post comments
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={handlePostCommentsToBitbucket}
+                                        disabled={postingComments || commentsPosted}
+                                        className={`px-6 py-2 rounded-lg font-medium transition-colors ${commentsPosted
+                                            ? 'bg-green-100 text-green-800 border border-green-200'
+                                            : postingComments
+                                                ? 'bg-gray-100 text-gray-500 cursor-not-allowed'
+                                                : 'bg-blue-600 text-white hover:bg-blue-700'
+                                            }`}
+                                    >
+                                        {commentsPosted ? (
+                                            <span className="flex items-center">
+                                                ✅ Posted to Bitbucket
+                                            </span>
+                                        ) : postingComments ? (
+                                            <span className="flex items-center">
+                                                <svg className="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                </svg>
+                                                Posting...
+                                            </span>
+                                        ) : (
+                                            <span className="flex items-center">
+                                                📤 Post to Bitbucket
+                                            </span>
+                                        )}
+                                    </button>
                                 </div>
                             </div>
                         )}
@@ -388,7 +520,7 @@ const FileChangesWithGlobalAI: React.FC<FileChangesWithGlobalAIProps> = ({ repos
                 {!hasReviewed && !reviewLoading && (
                     <div className="text-center py-8 text-gray-500">
                         <div className="text-4xl mb-2">🤖</div>
-                        <p className="text-sm">Click "Review Entire PR" to get comprehensive AI analysis</p>
+                        {/* <p className="text-sm">Click "Review Entire PR" to get comprehensive AI analysis</p> */}
                         <p className="text-xs mt-1">Analyzes all files with inline comments like Bitbucket</p>
                     </div>
                 )}
